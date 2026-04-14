@@ -1,0 +1,7 @@
+.venv
+*.lock
+launch.bat
+__pycache__
+deploy
+*.egg-info
+unsloth_compiled_cache
