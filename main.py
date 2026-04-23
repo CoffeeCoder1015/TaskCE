@@ -2,6 +2,9 @@ import os
 from datasets import load_dataset
 import random
 
+from evaluation import Evaluate
+from evaluation.evalConfig import EvalConfig
+
 # Assumed to be used in conjunction with https://github.com/CoffeeCoder1015/multitune
 lora_dir = "../multitune/output"
 
@@ -50,3 +53,22 @@ def snli_formatter(example):
     example["prompt"] = prompt
     example["completion"] = completion
     return example
+
+
+Evaluate(
+    model="LiquidAI/LFM2.5-1.2B-Thinking",
+    tasks=[
+        EvalConfig(
+            name="snli",
+            dataset=snli_val,
+            data_formatter=snli_formatter,
+            eval_fn=lambda x:True,
+        ),
+        EvalConfig(
+            name="fallacy",
+            dataset=logic_fallacy_val,
+            data_formatter=fallacy_formatter,
+            eval_fn=lambda x:True,
+        ),
+    ]
+)
