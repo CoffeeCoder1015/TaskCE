@@ -10,53 +10,26 @@ from capture.captureConfig import CaptureConfig
 
 
 def resolve_capture_layer(model, layer):
-    # Use the model's own named modules as the source of truth.
-    # The empty name is the whole model, so skip it and expose every real named module.
+    # Return the layer to be captured on the model either by name or by index
     named_layers = [
         (name, module)
         for name, module in model.named_modules()
         if name
     ]
-    named_modules = dict(named_layers)
 
-    # A manual module path should mean exactly what the caller wrote.
     if isinstance(layer, str):
-        if layer in named_modules:
-            print(f"Capturing manual layer path: {layer}")
-            return named_modules[layer], layer, None
+        resolved_path = layer
+        resolved_module = dict(named_layers)[layer]
+        layer_index = None
 
-        candidate_paths = [name for name, module in named_layers][:50]
-        raise ValueError(
-            f"Layer path '{layer}' was not found. Candidate paths include: {candidate_paths}"
-        )
-
-    if not named_layers:
-        raise ValueError("The model does not expose any named modules to hook.")
-
-    # None means the default requested behavior: second-to-last named module.
-    if layer is None:
-        layer_index = len(named_layers) - 2
     else:
         layer_index = layer
+        resolved_path, resolved_module = named_layers[layer_index]
 
-    if not isinstance(layer_index, int):
-        raise TypeError("layer must be None, an int layer index, or a string module path.")
-
-    if layer_index < 0 or layer_index >= len(named_layers):
-        raise IndexError(
-            f"Layer index {layer_index} is out of range for the model's "
-            f"{len(named_layers)} named modules."
-        )
-
-    resolved_path, resolved_module = named_layers[layer_index]
-    print(
-        f"Capturing named module index {layer_index}; resolved path: {resolved_path}"
-    )
     return resolved_module, resolved_path, layer_index
 
 
 def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, batch_size=32):
-    # This mirrors evaluation model loading, but we do not create a generation pipeline.
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         dtype=torch.bfloat16,
@@ -67,52 +40,41 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
 
     model.eval()
 
-    capture_layer, resolved_layer_path, resolved_layer_index = resolve_capture_layer(model, layer)
     formatted_dataset = task.dataset.map(task.data_formatter)
-    prompts = formatted_dataset["prompt"]
+    tokenized_dataset = formatted_dataset.map(
+        lambda example: {
+            "input_ids": tokenizer.apply_chat_template(
+                example["prompt"],
+                add_generation_prompt=True,
+                tokenize=True,
+            )
+        }
+    )
 
-    # The formatter should tag each example with the correct downstream label.
-    # The existing repo formatters write this to "answer", and CaptureConfig keeps that default.
-    if task.label_field not in formatted_dataset.column_names:
-        raise ValueError(
-            f"Formatted dataset for task '{task.name}' does not contain "
-            f"label field '{task.label_field}'."
-        )
     labels = formatted_dataset[task.label_field]
+    input_ids = tokenized_dataset["input_ids"]
 
     states = []
-    captured_batch_vectors = []
+    activations = {}
+    capture_layer, resolved_layer_path, resolved_layer_index = resolve_capture_layer(model, layer)
 
     def capture_hook(module, inputs, output):
-        # Transformer blocks often return either a tensor or a tuple with the tensor first.
-        # The analysis target is one vector per prompt, so slice the final token immediately.
-        activation = output[0] if isinstance(output, (tuple, list)) else output
-        if not torch.is_tensor(activation):
-            raise TypeError(
-                f"Captured output from {resolved_layer_path} is not a tensor: "
-                f"{type(activation)}"
-            )
-        captured_batch_vectors.clear()
-        captured_batch_vectors.append(
-            activation.detach()[:, -1, :].to("cpu", dtype=torch.float32)
-        )
+        activations[resolved_layer_path] = output.detach()
 
     hook_handle = capture_layer.register_forward_hook(capture_hook)
 
     try:
         print(f"\nStarting {task.name} activation capture.")
         for i in tqdm(
-            range(0, len(prompts), batch_size),
+            range(0, len(input_ids), batch_size),
             desc=f"Capturing {task.name}",
         ):
-            batch_prompts = prompts[i:i + batch_size]
+            batch_input_ids = input_ids[i:i + batch_size]
 
-            # Match the reference script: chat-template the prompt and ask for model inputs.
-            tokenized = tokenizer.apply_chat_template(
-                batch_prompts,
-                add_generation_prompt=True,
+            # Pad only the current batch so each forward has a rectangular tensor.
+            tokenized = tokenizer.pad(
+                {"input_ids": batch_input_ids},
                 padding=True,
-                return_dict=True,
                 return_tensors="pt",
             )
 
@@ -124,18 +86,14 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
                 for key, value in tokenized.items()
             }
 
-            captured_batch_vectors.clear()
+            activations.clear()
             with torch.inference_mode():
                 model(**tokenized)
 
-            if not captured_batch_vectors:
-                raise RuntimeError(
-                    f"The hook for {resolved_layer_path} did not capture an activation."
-                )
-
             # PCA wants one vector per example. Left padding plus add_generation_prompt
             # makes the final sequence position the comparable prompt-final position.
-            states.append(captured_batch_vectors[0])
+            batch_states = activations[resolved_layer_path][:, -1, :]
+            states.append(batch_states.to("cpu", dtype=torch.float32))
 
         print(f"{task.name} activation capture finished.")
 
@@ -147,7 +105,6 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
         return {
             "states": states,
             "labels": labels,
-            "prompts": prompts,
             "layer": resolved_layer_path,
             "layer_index": resolved_layer_index,
             "model_id": model_id,
@@ -166,7 +123,7 @@ def Capture(
     model_id: str,
     lora_dir: str | None,
     tasks: list[CaptureConfig],
-    layer: int | str | None = None,
+    layer: int | str,
     batch_size: int = 32,
 ) -> dict:
     tokenizer = AutoTokenizer.from_pretrained(model_id)
