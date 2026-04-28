@@ -41,8 +41,8 @@ capture_results = Capture(
             data_formatter=format_snli_for_capture,
         )
     ],
-    # None means "auto-pick the second-to-last named module and print what was picked".
-    layer=None,
+    # -2 means the second-to-last named module exposed by the model.
+    layer=-2,
     batch_size=1,
 )
 
