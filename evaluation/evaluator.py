@@ -75,6 +75,17 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
         print_results(task.name, stats)
 
     print("[Finetuned model evaluation]")
-    task_names = os.listdir(lora_dir)
-    task_and_checkpts = {k:os.listdir(f"{lora_dir}/{k}") for k in task_names}
+    task_paths = {
+        path: os.path.join(lora_dir, path)
+        for path in os.listdir(lora_dir)
+        if os.path.isdir(os.path.join(lora_dir, path))
+    }
+    task_and_checkpts = {
+        task_name: [
+            os.path.join(task_path, path)
+            for path in os.listdir(task_path)
+            if os.path.isdir(os.path.join(task_path, path))
+        ]
+        for task_name, task_path in task_paths.items()
+    }
     print(task_and_checkpts)
