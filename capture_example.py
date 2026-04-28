@@ -1,6 +1,8 @@
 from collections import Counter
 
 from datasets import load_dataset
+import matplotlib.pyplot as plt
+from sklearn.decomposition import PCA
 
 from capture import Capture, CaptureConfig
 
@@ -24,6 +26,49 @@ def format_snli_for_capture(example):
     return example
 
 
+def plot_pca(capture_result, output_path, title):
+    states = capture_result["states"]
+    labels = capture_result["labels"]
+
+    print("Captured states shape:", tuple(states.shape))
+    print("Captured label counts:", Counter(labels))
+    print("Captured layer:", capture_result["layer"])
+
+    # PCA expects a 2D array shaped like [examples, activation_dimension].
+    # The capture package already returns CPU float32 tensors, so NumPy conversion is direct.
+    states_for_pca = states.numpy()
+    labels_for_plot = list(labels)
+
+    # Reduce the activation vectors to two coordinates so the label groups can be visualized.
+    pca = PCA(n_components=2)
+    pca_points = pca.fit_transform(states_for_pca)
+
+    print("PCA output shape:", pca_points.shape)
+    print("PCA explained variance ratio:", pca.explained_variance_ratio_)
+
+    # Plot each label separately so the legend and colors line up with the task labels.
+    for label in SNLI_LABELS:
+        x_values = [
+            pca_points[i, 0]
+            for i, example_label in enumerate(labels_for_plot)
+            if example_label == label
+        ]
+        y_values = [
+            pca_points[i, 1]
+            for i, example_label in enumerate(labels_for_plot)
+            if example_label == label
+        ]
+        plt.scatter(x_values, y_values, label=label, alpha=0.7, s=18)
+
+    plt.title(title)
+    plt.xlabel("PC1")
+    plt.ylabel("PC2")
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=200)
+    plt.close()
+
+
 snli_examples = load_dataset("snli", split="validation")
 
 capture_results = Capture(
@@ -40,13 +85,15 @@ capture_results = Capture(
     batch_size=512,
 )
 
-snli_base = capture_results["snli"]["base"]
+plot_pca(
+    capture_results["snli"]["base"],
+    "snli_activation_pca_base.png",
+    "SNLI base activation PCA",
+)
 
-# Analysis belongs outside capture. This is where PCA or other analysis will consume states.
-states = snli_base["states"]
-labels = snli_base["labels"]
-
-print("Captured states shape:", tuple(states.shape))
-print("Captured label counts:", Counter(labels))
-print("Captured layer:", snli_base["layer"])
-
+if "finetuned" in capture_results["snli"]:
+    plot_pca(
+        capture_results["snli"]["finetuned"],
+        "snli_activation_pca_finetuned.png",
+        "SNLI finetuned activation PCA",
+    )
