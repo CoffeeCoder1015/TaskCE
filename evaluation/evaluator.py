@@ -1,4 +1,5 @@
 from collections import Counter
+import os
 
 from evaluation.evalConfig import EvalConfig
 import torch
@@ -38,6 +39,7 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
     tg_pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
 
+    print("[Base model evaluation]")
     for task in tasks:
         formatted_dataset = task.dataset.map(task.data_formatter)
         prompts = formatted_dataset["prompt"]
@@ -71,3 +73,8 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
 
         stats = Counter(results)
         print_results(task.name, stats)
+
+    print("[Finetuned model evaluation]")
+    task_names = os.listdir(lora_dir)
+    task_and_checkpts = {k:os.listdir(f"{lora_dir}/{k}") for k in task_names}
+    print(task_and_checkpts)
