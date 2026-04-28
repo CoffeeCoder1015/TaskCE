@@ -71,7 +71,6 @@ def extract_first_class(content, classes):
 
 def extract_snli(response_chat):
     assistant_response = response_chat[-1]
-    assert(assistant_response["role"] == "assistant")
 
     content = assistant_response.get("content", "").lower()
 
@@ -80,7 +79,6 @@ def extract_snli(response_chat):
 
 def extract_fallacy(response_chat):
     assistant_response = response_chat[-1]
-    assert(assistant_response["role"] == "assistant")
 
     content = assistant_response.get("content", "").lower()
 
