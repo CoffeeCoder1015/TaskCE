@@ -82,7 +82,7 @@ capture_results = Capture(
         )
     ],
     layer=-2,
-    batch_size=512,
+    batch_size=256,
 )
 
 plot_pca(
