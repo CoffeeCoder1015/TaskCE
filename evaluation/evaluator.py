@@ -1,10 +1,12 @@
 from collections import Counter
+import gc
 import os
 
 from evaluation.evalConfig import EvalConfig
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from tqdm import tqdm
+from peft import PeftModel
 
 
 def evaluate_predictions(prediction, answer):
@@ -26,53 +28,63 @@ def print_results(task_name, stats):
     print("\033[94mAccuracy:\033[0m", accuracy)
 
 
-def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
+def eval_task(model_id, tokenizer, task, lora_path=None, batch_size=512):
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         dtype=torch.bfloat16,
         device_map="auto",
     )
+    if lora_path is not None:
+        model = PeftModel.from_pretrained(model, lora_path)
+
+    tg_pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer)
+
+    formatted_dataset = task.dataset.map(task.data_formatter)
+    prompts = formatted_dataset["prompt"]
+    answers = formatted_dataset["answer"]
+
+    responses_raw = []
+
+    print(f"\nStarting {task.name} inference.")
+    for i in tqdm(
+        range(0, len(prompts), batch_size),
+        desc=f"Generating {task.name}",
+    ):
+        batch = prompts[i:i + batch_size]
+        out = tg_pipeline(
+            batch,
+            batch_size=batch_size,
+            return_full_text=False,
+        )
+        responses_raw.extend(out)
+    print(f"{task.name} inference finished.")
+
+    response_chats = [resp[0]["generated_text"] for resp in responses_raw]
+    predictions = [task.eval_fn(response_chat) for response_chat in response_chats]
+    results = [
+        evaluate_predictions(prediction, answer)
+        for prediction, answer in zip(predictions, answers)
+    ]
+
+    stats = Counter(results)
+    print_results(task.name, stats)
+
+    del tg_pipeline, model
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
+def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "left"
-    tg_pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
 
     print("[Base model evaluation]")
     for task in tasks:
-        formatted_dataset = task.dataset.map(task.data_formatter)
-        prompts = formatted_dataset["prompt"]
-        answers = formatted_dataset["answer"]
-
-        responses_raw = []
-        batch_size = 8
-
-        # -------   Actual inference stage ---------
-        print(f"\nStarting {task.name} inference.")
-        for i in tqdm(
-            range(0, len(prompts), batch_size),
-            desc=f"Generating {task.name}",
-        ):
-            batch = prompts[i:i + batch_size]
-            out = tg_pipeline(
-                batch,
-                batch_size=batch_size,
-                return_full_text=False,
-            )
-            responses_raw.extend(out)
-        print(f"{task.name} inference finished.")
-        # -------   Actual inference stage ---------
-
-        response_chats = [resp[0]["generated_text"] for resp in responses_raw]
-        predictions = [task.eval_fn(response_chat) for response_chat in response_chats]
-        results = [
-            evaluate_predictions(prediction, answer)
-            for prediction, answer in zip(predictions, answers)
-        ]
-
-        stats = Counter(results)
-        print_results(task.name, stats)
+        eval_task(model_id, tokenizer, task)
 
     print("[Finetuned model evaluation]")
     task_paths = {
@@ -88,4 +100,14 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
         ]
         for task_name, task_path in task_paths.items()
     }
-    print(task_and_checkpts)
+    
+    # TODO: test on time dimension as well but currently using latest
+    latest_checkpoints = {k: sorted(v)[-1] for k,v in task_and_checkpts.items() if v}
+
+
+    for task in tasks:
+        if task.name not in latest_checkpoints:
+            print(f"Skipping {task.name}: no LoRA checkpoint found.")
+            continue
+
+        eval_task(model_id, tokenizer, task, lora_path=latest_checkpoints[task.name])
