@@ -62,19 +62,11 @@ def extract_first_class(content, classes):
     )[0]
 
 
-def extract_snli(response_chat):
-    assistant_response = response_chat[-1]
-
-    content = assistant_response.get("content", "").lower()
-
+def extract_snli(content):
     return extract_first_class(content, SNLI_LABELS)
 
 
-def extract_fallacy(response_chat):
-    assistant_response = response_chat[-1]
-
-    content = assistant_response.get("content", "").lower()
-
+def extract_fallacy(content):
     return extract_first_class(content, FALLACY_LABELS)
 
 
