@@ -33,27 +33,49 @@ def fallacy_formatter(example):
         "completion":completion
     }
 
-NLI_PROMPT_VARIATIONS = [
-    lambda p, h: f"Is the hypothesis entailed, neutral, or contradictory to the premise? Premise: {p} Hypothesis: {h}",
-    lambda p, h: f"What is the relationship between premise and hypothesis? Premise: {p} Hypothesis: {h}",
-    lambda p, h: f"Inference the relationship between the Premise: {p} and Hypothesis: {h}",
-    lambda p, h: f"Classify as entailment, neutral, or contradiction.\nPremise: {p}\nHypothesis: {h}",
-    lambda p, h: f"Premise: {p}\nHypothesis: {h}\nRelationship:",
-]
+system_prompt = {
+    "role": "system",
+    "content": """Determine the relationship between the `Premise`and `Hypothesis` and respond with an answer. 
+You must respond with an answer of `Entailment`, `Neutral` or `Contradiction`
+You need to respond in the format shown in the following by chosing one of thosw answers:
+<my_answer>[place your answer here]</my_answer>
+You are lay out the steps to your final answer before responding with your final answer, but you must respond in this format or else your answer will be rejected."""
+}
 
 CLASSIFICATION_MAP = ["entailment", "neutral", "contradiction"]
 
 def snli_formatter(example):
-    prompt_fn = random.choice(NLI_PROMPT_VARIATIONS)
-    prompt = [ {"role":"user","content":prompt_fn(example["premise"], example["hypothesis"])} ]
+    test_example = f"Premise: {example['premise']}\nHypothesis: {example['hypothesis']}"
+    prompt = [system_prompt, {"role": "user", "content": test_example}]
 
     label = CLASSIFICATION_MAP[example["label"]]
-    completion = [ {"role":"assistant", "content":label}]
+    completion = [{"role": "assistant", "content": f"<my_answer>{label}</my_answer>"}]
 
     example["prompt"] = prompt
     example["completion"] = completion
     return example
 
+
+def extract_first_snli(response_chat,answer):
+    assistant_response = response_chat[2]
+    assert assistant_response["role"] == "assistant"
+
+    content = assistant_response.get("content", "").lower()
+
+    print(f"\n\033[92mAssistant's Response:\033[0m {content}")
+
+    classifications = ["entailment", "neutral", "contradiction"]
+    classifications = {k: content.find(k) for k in classifications}
+
+    return min(
+        filter(lambda x: x[1] >= 0, classifications.items()),
+        key=lambda kv: kv[1],
+        default=(None, None)
+    )[0]
+
+
+def extract_first_fallacy(response_chat,answer):
+    pass
 
 Evaluate(
     model="LiquidAI/LFM2.5-1.2B-Thinking",
@@ -62,13 +84,13 @@ Evaluate(
             name="snli",
             dataset=snli_val,
             data_formatter=snli_formatter,
-            eval_fn=lambda x:True,
+            eval_fn=extract_first_snli,
         ),
         EvalConfig(
             name="fallacy",
             dataset=logic_fallacy_val,
             data_formatter=fallacy_formatter,
-            eval_fn=lambda x:True,
+            eval_fn=extract_first_fallacy,
         ),
     ]
 )
