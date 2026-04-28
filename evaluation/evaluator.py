@@ -46,6 +46,7 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
         responses_raw = []
         batch_size = 8
 
+        # -------   Actual inference stage ---------
         print(f"\nStarting {task.name} inference.")
         for i in tqdm(
             range(0, len(prompts), batch_size),
@@ -60,6 +61,7 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
             )
             responses_raw.extend(out)
         print(f"{task.name} inference finished.")
+        # -------   Actual inference stage ---------
 
         response_chats = [resp[0]["generated_text"] for resp in responses_raw]
         predictions = [task.eval_fn(response_chat) for response_chat in response_chats]
