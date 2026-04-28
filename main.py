@@ -23,20 +23,13 @@ FALLACY_LABELS = [
 
 SNLI_SYSTEM_PROMPT = {
     "role": "system",
-    "content": """Determine the relationship between the `Premise`and `Hypothesis` and respond with an answer.
-You must respond with an answer of `Entailment`, `Neutral` or `Contradiction`
-You need to respond in the format shown in the following by choosing one of those answers:
-<my_answer>[place your answer here]</my_answer>
-You may lay out the steps to your final answer before responding with your final answer, but you must respond in this format or else your answer will be rejected."""
+    "content": """Determine the relationship between the `premise`and `hypothesis` and respond with an answer.
+You must respond with an answer of `entailment`, `neutral` or `contradiction`"""
 }
 
 FALLACY_SYSTEM_PROMPT = {
     "role": "system",
-    "content": """Identify the logical fallacy in the `Text` and respond with an answer.
-You must respond with the exact fallacy label.
-You need to respond in the format shown in the following:
-<my_answer>[place your answer here]</my_answer>
-You may lay out the steps to your final answer before responding with your final answer, but you must respond in this format or else your answer will be rejected."""
+    "content": "Identify the logical fallacy in the text and respond with an answer."
 }
 
 def format_snli(example):
