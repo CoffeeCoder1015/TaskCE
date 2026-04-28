@@ -32,9 +32,11 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
         device_map="auto",
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
     tg_pipeline = pipeline("text-generation", model=model, tokenizer=tokenizer)
 
-    tokenizer.padding_side = "left"
 
     for task in tasks:
         formatted_dataset = task.dataset.map(task.data_formatter)
@@ -54,6 +56,7 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
                 batch,
                 max_new_tokens=task.token_limit,
                 batch_size=batch_size,
+                return_full_text=False,
             )
             responses_raw.extend(out)
         print(f"{task.name} inference finished.")
