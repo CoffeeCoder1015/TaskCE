@@ -28,7 +28,7 @@ def print_results(task_name, stats):
 def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
-        torch_dtype=torch.bfloat16,
+        dtype=torch.bfloat16,
         device_map="auto",
     )
     tokenizer = AutoTokenizer.from_pretrained(model_id)
@@ -55,7 +55,6 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
             batch = prompts[i:i + batch_size]
             out = tg_pipeline(
                 batch,
-                max_new_tokens=task.token_limit,
                 batch_size=batch_size,
                 return_full_text=False,
             )
