@@ -8,12 +8,33 @@ from capture import Capture, CaptureConfig
 
 
 SNLI_LABELS = ["entailment", "neutral", "contradiction"]
+FALLACY_LABELS = [
+    "appeal to emotion",
+    "false causality",
+    "ad populum",
+    "circular reasoning",
+    "fallacy of relevance",
+    "faulty generalization",
+    "ad hominem",
+    "fallacy of extension",
+    "equivocation",
+    "fallacy of logic",
+    "fallacy of credibility",
+    "intentional",
+    "false dilemma",
+]
 
 SNLI_SYSTEM_PROMPT = {
     "role": "system",
     "content": """Determine the relationship between the `premise`and `hypothesis` and respond with an answer.
 You must respond with an answer of `entailment`, `neutral` or `contradiction`""",
 }
+
+FALLACY_SYSTEM_PROMPT = {
+    "role": "system",
+    "content": "Identify the logical fallacy in the text and respond with an answer.",
+}
+
 
 def format_snli_for_capture(example):
     test_example = f"Premise: {example['premise']}\nHypothesis: {example['hypothesis']}"
@@ -26,7 +47,17 @@ def format_snli_for_capture(example):
     return example
 
 
-def plot_pca(capture_result, output_path, title):
+def format_fallacy_for_capture(example):
+    example["prompt"] = [
+        FALLACY_SYSTEM_PROMPT,
+        {"role": "user", "content": f"Text: {example['source_article']}"},
+    ]
+
+    example["answer"] = str(example["logical_fallacies"]).strip().lower()
+    return example
+
+
+def plot_pca(capture_result, output_path, title, ordered_labels):
     states = capture_result["states"]
     labels = capture_result["labels"]
 
@@ -47,7 +78,7 @@ def plot_pca(capture_result, output_path, title):
     print("PCA explained variance ratio:", pca.explained_variance_ratio_)
 
     # Plot each label separately so the legend and colors line up with the task labels.
-    for label in SNLI_LABELS:
+    for label in ordered_labels:
         x_values = [
             pca_points[i, 0]
             for i, example_label in enumerate(labels_for_plot)
@@ -70,6 +101,7 @@ def plot_pca(capture_result, output_path, title):
 
 
 snli_examples = load_dataset("snli", split="validation")
+fallacy_examples = load_dataset("tasksource/logical-fallacy", split="dev")
 
 capture_results = Capture(
     model_id="LiquidAI/LFM2.5-1.2B-Thinking",
@@ -79,7 +111,12 @@ capture_results = Capture(
             name="snli",
             dataset=snli_examples,
             data_formatter=format_snli_for_capture,
-        )
+        ),
+        CaptureConfig(
+            name="fallacy",
+            dataset=fallacy_examples,
+            data_formatter=format_fallacy_for_capture,
+        ),
     ],
     layer=-2,
     batch_size=256,
@@ -89,6 +126,7 @@ plot_pca(
     capture_results["snli"]["base"],
     "snli_activation_pca_base.png",
     "SNLI base activation PCA",
+    SNLI_LABELS,
 )
 
 if "finetuned" in capture_results["snli"]:
@@ -96,4 +134,20 @@ if "finetuned" in capture_results["snli"]:
         capture_results["snli"]["finetuned"],
         "snli_activation_pca_finetuned.png",
         "SNLI finetuned activation PCA",
+        SNLI_LABELS,
+    )
+
+plot_pca(
+    capture_results["fallacy"]["base"],
+    "fallacy_activation_pca_base.png",
+    "Logical fallacy base activation PCA",
+    FALLACY_LABELS,
+)
+
+if "finetuned" in capture_results["fallacy"]:
+    plot_pca(
+        capture_results["fallacy"]["finetuned"],
+        "fallacy_activation_pca_finetuned.png",
+        "Logical fallacy finetuned activation PCA",
+        FALLACY_LABELS,
     )
