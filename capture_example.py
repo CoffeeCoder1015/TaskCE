@@ -23,6 +23,11 @@ FALLACY_LABELS = [
     "intentional",
     "false dilemma",
 ]
+VITAMINC_LABELS = [
+    "supports",
+    "refutes",
+    "not enough info",
+]
 
 SNLI_SYSTEM_PROMPT = {
     "role": "system",
@@ -33,6 +38,12 @@ You must respond with an answer of `entailment`, `neutral` or `contradiction`"""
 FALLACY_SYSTEM_PROMPT = {
     "role": "system",
     "content": "Identify the logical fallacy in the text and respond with an answer.",
+}
+
+VITAMINC_SYSTEM_PROMPT = {
+    "role": "system",
+    "content": """Determine the relationship between the `claim`and `evidence` and respond with an answer.
+You must respond with an answer of `supports`, `refutes` or `not enough info`"""
 }
 
 
@@ -54,6 +65,17 @@ def format_fallacy_for_capture(example):
     ]
 
     example["answer"] = str(example["logical_fallacies"]).strip().lower()
+    return example
+
+
+def format_vitaminc_for_capture(example):
+    test_example = f"Evidence: {example['evidence']}\nClaim: {example['claim']}"
+    example["prompt"] = [
+        VITAMINC_SYSTEM_PROMPT,
+        {"role": "user", "content": test_example},
+    ]
+
+    example["answer"] = str(example["label"]).lower()
     return example
 
 
@@ -102,6 +124,7 @@ def plot_pca(capture_result, output_path, title, ordered_labels):
 
 snli_examples = load_dataset("snli", split="validation")
 fallacy_examples = load_dataset("tasksource/logical-fallacy", split="dev")
+vitaminc_examples = load_dataset("tals/vitaminc", split="validation")
 
 capture_results = Capture(
     model_id="LiquidAI/LFM2.5-1.2B-Thinking",
@@ -116,6 +139,11 @@ capture_results = Capture(
             name="fallacy",
             dataset=fallacy_examples,
             data_formatter=format_fallacy_for_capture,
+        ),
+        CaptureConfig(
+            name="claim",
+            dataset=vitaminc_examples,
+            data_formatter=format_vitaminc_for_capture,
         ),
     ],
     layer=-2,
@@ -150,4 +178,19 @@ if "finetuned" in capture_results["fallacy"]:
         "fallacy_activation_pca_finetuned.png",
         "Logical fallacy finetuned activation PCA",
         FALLACY_LABELS,
+    )
+
+plot_pca(
+    capture_results["claim"]["base"],
+    "claim_activation_pca_base.png",
+    "VitaminC claim base activation PCA",
+    VITAMINC_LABELS,
+)
+
+if "finetuned" in capture_results["claim"]:
+    plot_pca(
+        capture_results["claim"]["finetuned"],
+        "claim_activation_pca_finetuned.png",
+        "VitaminC claim finetuned activation PCA",
+        VITAMINC_LABELS,
     )
