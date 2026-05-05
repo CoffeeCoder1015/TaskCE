@@ -63,5 +63,4 @@ def top_token_counts(
     if len(token_ids) < top_k:
         print(f"Warning: top_k={top_k} includes zero-count tokens")
 
-    tokens = [tokenizer.decode([token_id]) for token_id in token_ids]
-    return [(token, int(counts[token_id])) for token, token_id in zip(tokens, token_ids)]
+    return token_ids
