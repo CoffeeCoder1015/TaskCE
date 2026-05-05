@@ -85,3 +85,15 @@ capture_results = Capture(
     layer=-2,
     batch_size=256,
 )
+
+activations_base = capture_results["snli"]["base"]
+activations_fine = capture_results["snli"]["finetuned"]
+
+def beamsearch(features,activations):
+    beam_size = 5
+    formula_length = 5
+    print(activations.shape)
+    
+
+beamsearch(feature_vectors,activations_fine)
+
