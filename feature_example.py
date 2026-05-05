@@ -1,33 +1,30 @@
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Iterable
 from itertools import chain
-from typing import Any
 
 import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer
 
 
-def format_snli_text(example: Mapping[str, Any]) -> dict[str, str]:
+def format_snli_text(example):
     return {"premise": example["premise"], "hypothesis": example["hypothesis"]}
 
 
-def format_fallacy_text(example: Mapping[str, Any]) -> dict[str, str]:
+def format_fallacy_text(example):
     return {"text": example["source_article"]}
 
 
-def format_vitaminc_text(example: Mapping[str, Any]) -> dict[str, str]:
+def format_vitaminc_text(example):
     return {"evidence": example["evidence"], "claim": example["claim"]}
 
 
-def normalize_dataset(
-    dataset: Iterable[Mapping[str, Any]],
-) -> Iterator[tuple[str, str]]:
+def normalize_dataset(dataset):
     for example in dataset:
         for _, sentence in example.items():
             yield sentence
 
 
-def batched(iterable: Iterable[str], batch_size: int) -> Iterator[list[str]]:
+def batched(iterable, batch_size):
     batch: list[str] = []
     for item in iterable:
         batch.append(item)
@@ -39,11 +36,7 @@ def batched(iterable: Iterable[str], batch_size: int) -> Iterator[list[str]]:
         yield batch
 
 
-def count_model_token_ids(
-    dataset: Iterable[Mapping[str, Any]],
-    tokenizer: Any,
-    batch_size: int = 256,
-) -> np.ndarray:
+def count_model_token_ids(dataset, tokenizer, batch_size=256):
     vocab_size = len(tokenizer) if hasattr(tokenizer, "__len__") else tokenizer.vocab_size
     counts = np.zeros(vocab_size, dtype=np.int64)
     sentences = normalize_dataset(dataset)
@@ -68,10 +61,12 @@ def count_model_token_ids(
 
 def top_token_counts(
     counts: np.ndarray,
-    tokenizer: Any,
-    top_k: int = 2_000,
-) -> list[tuple[str, int]]:
+    tokenizer,
+    top_k=2_000,
+):
     token_ids = np.argsort(-counts)[:top_k].tolist()
+    if counts[token_ids[-1]] == 0:
+        print(f"Warning: top_k={top_k} includes zero-count tokens")
     tokens = tokenizer.convert_ids_to_tokens(token_ids)
     return [(token, int(counts[token_id])) for token, token_id in zip(tokens, token_ids)]
 
