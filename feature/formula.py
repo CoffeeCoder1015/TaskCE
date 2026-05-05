@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from attr import dataclass
 
+
+# For clarity sake: every formula element is a Node with recursive flattening.
+class Node:
+    def flatten(self):
+        raise NotImplementedError
+
+
 @dataclass(frozen=True)
-class Leaf:
+class Leaf(Node):
     label: str
     token_id: int
     token: str
@@ -13,7 +20,7 @@ class Leaf:
 
 
 @dataclass(frozen=True)
-class Not:
+class Not(Node):
     child: Node
 
     def flatten(self):
@@ -21,7 +28,7 @@ class Not:
 
 
 @dataclass(frozen=True)
-class And:
+class And(Node):
     left: Node
     right: Node
 
@@ -30,12 +37,9 @@ class And:
 
 
 @dataclass(frozen=True)
-class Or:
+class Or(Node):
     left: Node
     right: Node
 
     def flatten(self):
         return f"({self.left.flatten()} OR {self.right.flatten()})"
-
-# For clarity sake: every formula node is either a leaf or an operator.
-type Node = Leaf | Not | And | Or

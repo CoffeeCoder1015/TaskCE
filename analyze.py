@@ -5,6 +5,7 @@ from feature import (
     count_model_token_ids,
     top_token_counts,
 )
+from feature.beamsearch import beam_search
 from feature.construct import construct_label_vocab_matrices, construct_vectors
 from capture import Capture, CaptureConfig
 
@@ -89,11 +90,19 @@ capture_results = Capture(
 activations_base = capture_results["snli"]["base"]
 activations_fine = capture_results["snli"]["finetuned"]
 
-def beamsearch(features,activations):
-    beam_size = 5
-    formula_length = 5
-    print(activations.shape)
-    
+beam_results = beam_search(
+    feature_vectors,
+    activations_fine,
+    beam_size=5,
+    formula_length=5,
+)
 
-beamsearch(feature_vectors,activations_fine)
-
+print("Best beam search formula per neuron:")
+for rank, result in enumerate(beam_results, start=1):
+    print(
+        f"{rank}. score={result.score:.4f} "
+        f"corr={result.correlation:.4f} "
+        f"activation={result.activation_index} "
+        f"support={result.support} "
+        f"formula={result.formula.flatten()}"
+    )
