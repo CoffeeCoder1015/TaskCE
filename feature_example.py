@@ -84,3 +84,5 @@ for task_name, dataset in datasets.items():
     print(f"Final binary feature nonzeros: {sum(vector.sum() for _, vector in feature_vectors)}")
     print("First 10 feature names:", [formula.flatten() for formula, _ in feature_vectors[:10]])
     print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
+    print("Example:")
+    print(feature_vectors[0])
