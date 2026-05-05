@@ -10,3 +10,5 @@ class CaptureConfig:
     dataset: Dataset
     data_formatter: Callable
     label_field: str = "answer"
+    need_formatting: bool = True
+    need_tokenizing: bool = True
