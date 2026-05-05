@@ -43,7 +43,12 @@ for task_name, dataset in datasets.items():
         tokenizer,
         batch_size=512,
     )
-    top_tokens = top_token_counts(token_counts, tokenizer, top_k=2_000)
+    top_token_ids = top_token_counts(token_counts, tokenizer, top_k=2_000)
+    tokens = [tokenizer.decode([token_id]) for token_id in top_token_ids]
+    top_tokens = [
+        (token, int(token_counts[token_id]))
+        for token, token_id in zip(tokens, top_token_ids)
+    ]
     print(f"\nTask: {task_name}")
     print(f"Top token count: {len(top_tokens)}")
     print("Top 10 tokens:", top_tokens[:10])
