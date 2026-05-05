@@ -47,10 +47,30 @@ def batched_with_start(iterable, batch_size):
         row_start += len(batch)
 
 
-def construct_vectors(label_vocab_matrices, features):
+def construct_vectors(label_vocab_matrices, features, tokenizer):
     sparse_feature_matrix = hstack(
         [matrix[:, features] for matrix in label_vocab_matrices.values()],
         format="csr",
         dtype=np.int8,
     )
-    return sparse_feature_matrix.toarray()
+    dense_feature_matrix = sparse_feature_matrix.toarray()
+    feature_vectors = []
+    feature_index = 0
+
+    for label in label_vocab_matrices:
+        for token_id in features:
+            decoded_token = tokenizer.decode([token_id])
+            feature_vectors.append(
+                (
+                    {
+                        "label": label,
+                        "token_id": token_id,
+                        "token": decoded_token,
+                        "name": f"{label}:{decoded_token}",
+                    },
+                    dense_feature_matrix[:, feature_index],
+                )
+            )
+            feature_index += 1
+
+    return feature_vectors
