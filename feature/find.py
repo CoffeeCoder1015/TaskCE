@@ -10,6 +10,7 @@ from feature.skip import token_should_be_skipped
 
 
 def normalize_dataset(dataset: Iterable[Mapping[str, str]]) -> Iterator[str]:
+    # examples with multiple label inputs are all pooled
     for example in dataset:
         for sentence in example.values():
             yield sentence

@@ -49,6 +49,7 @@ def batched_with_start(iterable, batch_size):
 
 
 def construct_vectors(label_vocab_matrices, features, tokenizer):
+    # Pick out from all binary vectors the most frequently activated
     sparse_feature_matrix = hstack(
         [matrix[:, features] for matrix in label_vocab_matrices.values()],
         format="csr",
