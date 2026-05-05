@@ -40,15 +40,27 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
 
     model.eval()
 
-    formatted_dataset = task.dataset.map(task.data_formatter)
-    tokenized_dataset = formatted_dataset.map(
-        lambda example: {
-            "input_ids": tokenizer.apply_chat_template(
-                example["prompt"],
-                add_generation_prompt=True,
-                tokenize=True,
-            )
-        }
+    print(
+        f"{task.name}: formatting={task.need_formatting}, "
+        f"tokenizing={task.need_tokenizing}"
+    )
+    formatted_dataset = (
+        task.dataset.map(task.data_formatter)
+        if task.need_formatting
+        else task.dataset
+    )
+    tokenized_dataset = (
+        formatted_dataset.map(
+            lambda example: {
+                "input_ids": tokenizer.apply_chat_template(
+                    example["prompt"],
+                    add_generation_prompt=True,
+                    tokenize=True,
+                )
+            }
+        )
+        if task.need_tokenizing
+        else formatted_dataset
     )
 
     labels = formatted_dataset[task.label_field]
