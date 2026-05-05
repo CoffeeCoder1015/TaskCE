@@ -3,7 +3,7 @@ from evaluation import Evaluate, EvalConfig
 
 snli_val = load_dataset("snli", split="validation")
 logic_fallacy_val = load_dataset("tasksource/logical-fallacy",split="dev")
-vitaminc_val = load_dataset("tals/vitaminc",split="validation")
+vitaminc_val = load_dataset("tals/vitaminc",split="validation[:10_000]")
 
 SNLI_LABELS = ["entailment", "neutral", "contradiction"]
 FALLACY_LABELS = [
