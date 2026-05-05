@@ -20,7 +20,7 @@ def format_vitaminc_text(example):
     return {"evidence": example["evidence"], "claim": example["claim"]}
 
 
-model_id = "LiquidAI/LFM2.5-1.2B-Base"
+model_id = "LiquidAI/LFM2.5-1.2B-Thinking"
 tokenizer = AutoTokenizer.from_pretrained(model_id)
 datasets = {
     "snli": load_dataset("snli", split="validation", trust_remote_code=True),
