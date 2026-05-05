@@ -59,14 +59,42 @@ def count_model_token_ids(dataset, tokenizer, batch_size=256):
     return counts
 
 
+SKIP_TOKENS = {"a", "an", "the", "of", ".", ",", ""}
+
+
+def special_token_ids(tokenizer):
+    ids = set()
+    for token_id in tokenizer.all_special_ids or []:
+        ids.add(token_id)
+    return ids
+
+
 def top_token_counts(
     counts: np.ndarray,
     tokenizer,
     top_k=2_000,
 ):
-    token_ids = np.argsort(-counts)[:top_k].tolist()
-    if counts[token_ids[-1]] == 0:
+    sorted_token_ids = np.argsort(-counts).tolist()
+    skipped_special_ids = special_token_ids(tokenizer)
+    token_ids = []
+    i = 0
+
+    while len(token_ids) < top_k and counts[sorted_token_ids[i]] > 0:
+        token_id = sorted_token_ids[i]
+        i += 1
+
+        if token_id in skipped_special_ids:
+            continue
+
+        token = tokenizer.decode([token_id]).strip().lower()
+        if token in SKIP_TOKENS:
+            continue
+
+        token_ids.append(token_id)
+
+    if len(token_ids) < top_k:
         print(f"Warning: top_k={top_k} includes zero-count tokens")
+
     tokens = [tokenizer.decode([token_id]) for token_id in token_ids]
     return [(token, int(counts[token_id])) for token, token_id in zip(tokens, token_ids)]
 
@@ -103,3 +131,4 @@ for task_name, dataset in datasets.items():
     print(f"\nTask: {task_name}")
     print(f"Top token count: {len(top_tokens)}")
     print("Top 10 tokens:", top_tokens[:10])
+
