@@ -1,9 +1,7 @@
-from collections.abc import Iterable
-from itertools import chain
-
-import numpy as np
 from datasets import load_dataset
 from transformers import AutoTokenizer
+
+from feature import count_model_token_ids, top_token_counts
 
 
 def format_snli_text(example):
@@ -16,88 +14,6 @@ def format_fallacy_text(example):
 
 def format_vitaminc_text(example):
     return {"evidence": example["evidence"], "claim": example["claim"]}
-
-
-def normalize_dataset(dataset):
-    for example in dataset:
-        for _, sentence in example.items():
-            yield sentence
-
-
-def batched(iterable, batch_size):
-    batch: list[str] = []
-    for item in iterable:
-        batch.append(item)
-        if len(batch) == batch_size:
-            yield batch
-            batch = []
-
-    if batch:
-        yield batch
-
-
-def count_model_token_ids(dataset, tokenizer, batch_size=256):
-    vocab_size = len(tokenizer) if hasattr(tokenizer, "__len__") else tokenizer.vocab_size
-    counts = np.zeros(vocab_size, dtype=np.int64)
-    sentences = normalize_dataset(dataset)
-
-    for batch in batched(sentences, batch_size):
-        encoded = tokenizer(
-            batch,
-            add_special_tokens=False,
-            return_attention_mask=False,
-        )
-        input_ids = encoded["input_ids"]
-        
-        # For debugging (differnet HF Transformer versions have different batching behavior)
-        # print(input_ids)
-        # exit()
-
-        flat_ids = np.fromiter(chain.from_iterable(input_ids), dtype=np.int64)
-        counts += np.bincount(flat_ids, minlength=vocab_size)[:vocab_size]
-
-    return counts
-
-
-SKIP_TOKENS = {"a", "an", "the", "of", ".", ",", ""}
-
-
-def special_token_ids(tokenizer):
-    ids = set()
-    for token_id in tokenizer.all_special_ids or []:
-        ids.add(token_id)
-    return ids
-
-
-def top_token_counts(
-    counts: np.ndarray,
-    tokenizer,
-    top_k=2_000,
-):
-    sorted_token_ids = np.argsort(-counts).tolist()
-    skipped_special_ids = special_token_ids(tokenizer)
-    token_ids = []
-    i = 0
-
-    while len(token_ids) < top_k and counts[sorted_token_ids[i]] > 0:
-        token_id = sorted_token_ids[i]
-        i += 1
-
-        if token_id in skipped_special_ids:
-            continue
-
-        token = tokenizer.decode([token_id]).strip().lower()
-        if token in SKIP_TOKENS:
-            continue
-
-        token_ids.append(token_id)
-
-    if len(token_ids) < top_k:
-        print(f"Warning: top_k={top_k} includes zero-count tokens")
-
-    tokens = [tokenizer.decode([token_id]) for token_id in token_ids]
-    return [(token, int(counts[token_id])) for token, token_id in zip(tokens, token_ids)]
-
 
 
 model_id = "LiquidAI/LFM2.5-1.2B-Base"
@@ -131,4 +47,3 @@ for task_name, dataset in datasets.items():
     print(f"\nTask: {task_name}")
     print(f"Top token count: {len(top_tokens)}")
     print("Top 10 tokens:", top_tokens[:10])
-
