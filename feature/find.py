@@ -37,12 +37,7 @@ def special_token_ids(tokenizer) -> set[int]:
     return set(tokenizer.all_special_ids or [])
 
 
-def top_token_counts(
-    counts: np.ndarray,
-    tokenizer,
-    top_k=2_000,
-):
-    sorted_token_ids = np.argsort(-counts).tolist()
+def filter_token_ids(sorted_token_ids, counts, tokenizer, top_k=2_000):
     skipped_special_ids = special_token_ids(tokenizer)
     token_ids = []
     i = 0
@@ -64,3 +59,12 @@ def top_token_counts(
         print(f"Warning: top_k={top_k} includes zero-count tokens")
 
     return token_ids
+
+
+def top_token_counts(
+    counts: np.ndarray,
+    tokenizer,
+    top_k=2_000,
+):
+    sorted_token_ids = np.argsort(-counts).tolist()
+    return filter_token_ids(sorted_token_ids, counts, tokenizer, top_k=top_k)
