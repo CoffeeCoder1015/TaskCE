@@ -68,11 +68,8 @@ for task_name, dataset in datasets.items():
         batch_size=512,
     )
     feature_matrix = construct_vectors(
-        formatted_dataset,
-        None,
-        tokenizer,
+        label_vocab_matrices,
         top_token_ids,
-        batch_size=512,
     )
 
     print(f"\nTask: {task_name}")
@@ -82,5 +79,5 @@ for task_name, dataset in datasets.items():
     print(f"Top token count: {len(top_token_ids)}")
     print(f"Label vocab matrix shapes: { {k: v.shape for k, v in label_vocab_matrices.items()} }")
     print(f"Final binary feature matrix shape: {feature_matrix.shape}")
-    print(f"Final binary feature matrix nonzeros: {feature_matrix.nnz}")
+    print(f"Final binary feature matrix nonzeros: {feature_matrix.sum()}")
     print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
