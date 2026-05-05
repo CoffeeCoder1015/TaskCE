@@ -6,6 +6,7 @@ from feature import (
     top_token_counts,
 )
 from feature.construct import construct_label_vocab_matrices, construct_vectors
+from capture import Capture, CaptureConfig
 
 def format_snli_text(example):
     return {"premise": example["premise"], "hypothesis": example["hypothesis"]}
@@ -53,3 +54,34 @@ print(f"Final binary feature vector length: {len(feature_vectors[0][1])}")
 print(f"Final binary feature nonzeros: {sum(vector.sum() for _, vector in feature_vectors)}")
 print("First 10 feature names:", [formula.flatten() for formula, _ in feature_vectors[:10]])
 print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
+
+
+SNLI_LABELS = ["entailment", "neutral", "contradiction"]
+SNLI_SYSTEM_PROMPT = {
+    "role": "system",
+    "content": """Determine the relationship between the `premise`and `hypothesis` and respond with an answer.
+You must respond with an answer of `entailment`, `neutral` or `contradiction`""",
+}
+def format_snli_for_capture(example):
+    test_example = f"Premise: {example['premise']}\nHypothesis: {example['hypothesis']}"
+    example["prompt"] = [
+        SNLI_SYSTEM_PROMPT,
+        {"role": "user", "content": test_example},
+    ]
+
+    example["answer"] = SNLI_LABELS[example["label"]]
+    return example
+
+capture_results = Capture(
+    model_id="LiquidAI/LFM2.5-1.2B-Thinking",
+    lora_dir="../multitune/output",  # Assumed to be used in conjunction with https://github.com/CoffeeCoder1015/multitune
+    tasks=[
+        CaptureConfig(
+            name="snli",
+            dataset=dataset,
+            data_formatter=format_snli_for_capture,
+        )
+    ],
+    layer=-2,
+    batch_size=256,
+)
