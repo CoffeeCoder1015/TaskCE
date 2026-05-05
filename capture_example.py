@@ -124,7 +124,7 @@ def plot_pca(capture_result, output_path, title, ordered_labels):
 
 snli_examples = load_dataset("snli", split="validation")
 fallacy_examples = load_dataset("tasksource/logical-fallacy", split="dev")
-vitaminc_examples = load_dataset("tals/vitaminc", split="validation")
+vitaminc_examples = load_dataset("tals/vitaminc", split="validation[:10_000]")
 
 capture_results = Capture(
     model_id="LiquidAI/LFM2.5-1.2B-Thinking",
