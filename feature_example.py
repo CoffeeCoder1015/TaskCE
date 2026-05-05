@@ -67,7 +67,7 @@ def top_token_counts(
     token_ids = np.argsort(-counts)[:top_k].tolist()
     if counts[token_ids[-1]] == 0:
         print(f"Warning: top_k={top_k} includes zero-count tokens")
-    tokens = tokenizer.convert_ids_to_tokens(token_ids)
+    tokens = [tokenizer.decode([token_id]) for token_id in token_ids]
     return [(token, int(counts[token_id])) for token, token_id in zip(tokens, token_ids)]
 
 
