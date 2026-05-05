@@ -2,7 +2,7 @@
 name = "taskce"
 version = "0.1.0"
 description = ""
-requires-python = "==3.12"
+requires-python = ">=3.12"
 dependencies = [
     "transformers>=4.40.0",
     "trl[vllm]>=0.8.0",
@@ -11,6 +11,7 @@ dependencies = [
     "accelerate>=0.28.0",
     "torch>=2.9.0",
     "scikit-learn",
+    "scipy",
     "matplotlib",
     "wandb",
     "flash_attn @ https://github.com/mjun0812/flash-attention-prebuild-wheels/releases/download/v0.9.0/flash_attn-2.8.3+cu128torch2.10-cp312-cp312-linux_x86_64.whl",
