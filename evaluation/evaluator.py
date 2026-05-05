@@ -28,7 +28,7 @@ def print_results(task_name, stats):
     print("\033[94mAccuracy:\033[0m", accuracy)
 
 
-def eval_task(model_id, tokenizer, task, lora_path=None, batch_size=512):
+def eval_task(model_id, tokenizer, task, lora_path=None, batch_size=128):
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
         dtype=torch.bfloat16,
