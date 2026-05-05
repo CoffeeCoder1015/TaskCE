@@ -10,10 +10,11 @@ def construct_label_vocab_matrices(dataset, tokenizer, formatter=None, batch_siz
         if formatter is not None
         else dataset
     )
-    vocab_size = len(tokenizer) if hasattr(tokenizer, "__len__") else tokenizer.vocab_size
+    vocab_size = len(tokenizer) 
     matrices = {}
 
     for label in formatted_dataset.column_names:
+        # construct binary vectors for each label (premise, hypothesis, etc)
         rows = []
         cols = []
 
@@ -25,9 +26,9 @@ def construct_label_vocab_matrices(dataset, tokenizer, formatter=None, batch_siz
             )
             for batch_offset, token_ids in enumerate(encoded["input_ids"]):
                 row_idx = row_start + batch_offset
-                for token_id in set(token_ids):
-                    rows.append(row_idx)
-                    cols.append(token_id)
+                for token_id in set(token_ids): # set compresses into uniquely activated tokens 
+                    rows.append(row_idx) # <- token presence for the example axis
+                    cols.append(token_id) # <- binary vectors axis
 
         data = np.ones(len(rows), dtype=np.int8)
         matrices[label] = csr_matrix(
@@ -46,15 +47,10 @@ def batched_with_start(iterable, batch_size):
         row_start += len(batch)
 
 
-def construct_vectors(dataset, formatter, tokenizer, features, batch_size=256):
-    matrices = construct_label_vocab_matrices(
-        dataset,
-        tokenizer,
-        formatter=formatter,
-        batch_size=batch_size,
-    )
-    return hstack(
-        [matrix[:, features] for matrix in matrices.values()],
+def construct_vectors(label_vocab_matrices, features):
+    sparse_feature_matrix = hstack(
+        [matrix[:, features] for matrix in label_vocab_matrices.values()],
         format="csr",
         dtype=np.int8,
     )
+    return sparse_feature_matrix.toarray()
