@@ -1,8 +1,8 @@
-from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 import heapq
 import multiprocessing as mp
 
+import numpy as np
 import torch
 
 from feature.formula import And, Not, Or
@@ -52,6 +52,19 @@ def to_binary_tensor(value, device):
 def prepare_feature_vectors(feature_vectors, device):
     return [
         (formula, to_binary_tensor(binary_vector, device))
+        for formula, binary_vector in feature_vectors
+    ]
+
+
+def to_numpy_bool(value):
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy().astype(np.bool_, copy=False)
+    return np.asarray(value, dtype=np.bool_)
+
+
+def prepare_multiprocessing_feature_vectors(feature_vectors):
+    return [
+        (formula, to_numpy_bool(binary_vector))
         for formula, binary_vector in feature_vectors
     ]
 
@@ -130,10 +143,12 @@ def beamsearch_chunk(
             complexity_penalty,
             score_batch_size,
         )
+        nonzero_candidates = [
+            candidate for candidate in leaf_candidates if candidate.score > 0
+        ]
         nonzero_features = [
             (candidate.formula, candidate.mask)
-            for candidate in leaf_candidates
-            if candidate.score > 0
+            for candidate in nonzero_candidates
         ]
 
         best = max(leaf_candidates, key=lambda candidate: candidate.score, default=None)
@@ -144,7 +159,7 @@ def beamsearch_chunk(
         expansions = 0
         next_queue_id = 0
 
-        for candidate in leaf_candidates:
+        for candidate in nonzero_candidates:
             heapq.heappush(frontier, (-candidate.score, next_queue_id, candidate))
             queued_formulas.add(candidate.formula)
             next_queue_id += 1
@@ -252,8 +267,8 @@ def beamsearch_all(
             device,
         )
 
-    activation_vectors = to_binary_tensor(activation_vectors, torch.device("cpu"))
-    feature_vectors = prepare_feature_vectors(feature_vectors, torch.device("cpu"))
+    activation_vectors = to_numpy_bool(activation_vectors)
+    feature_vectors = prepare_multiprocessing_feature_vectors(feature_vectors)
     chunks = activation_index_chunks(activation_vectors.shape[1], num_workers)
     if not chunks:
         return []
@@ -273,11 +288,8 @@ def beamsearch_all(
     ]
 
     context = mp.get_context("spawn")
-    with ProcessPoolExecutor(
-        max_workers=len(worker_args),
-        mp_context=context,
-    ) as executor:
-        result_chunks = list(executor.map(beamsearch_worker, worker_args))
+    with context.Pool(processes=len(worker_args)) as pool:
+        result_chunks = pool.map(beamsearch_worker, worker_args)
 
     results = [
         result
