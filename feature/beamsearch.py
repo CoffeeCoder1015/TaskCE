@@ -28,6 +28,13 @@ def iou(v1, v2):
     return (intersection.float() / union.float()).item()
 
 
+def batched_iou(masks, neuron):
+    intersections = (masks & neuron).sum(dim=1)
+    unions = (masks | neuron).sum(dim=1)
+    raw_scores = intersections.float() / unions.clamp_min(1).float()
+    return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
+
+
 def resolve_device(device=None):
     if device is not None:
         return torch.device(device)
@@ -57,13 +64,27 @@ def append_sample(samples, candidate, beam_size):
     del samples[beam_size:]
 
 
-def candidate_for(formula, mask, neuron, complexity_penalty):
-    raw_score = iou(mask, neuron)
-    return BeamCandidate(
-        score=(complexity_penalty ** (len(formula) - 1)) * raw_score,
-        formula=formula,
-        mask=mask,
-    )
+def score_formula_masks(formula_masks, neuron, complexity_penalty, score_batch_size):
+    candidates = []
+    for start in range(0, len(formula_masks), score_batch_size):
+        batch = formula_masks[start:start + score_batch_size]
+        formulas = [formula for formula, _ in batch]
+        masks = torch.stack([mask for _, mask in batch])
+        raw_scores = batched_iou(masks, neuron)
+        penalties = torch.tensor(
+            [
+                complexity_penalty ** (len(formula) - 1)
+                for formula in formulas
+            ],
+            dtype=raw_scores.dtype,
+            device=raw_scores.device,
+        )
+        scores = (raw_scores * penalties).tolist()
+        candidates.extend(
+            BeamCandidate(score=score, formula=formula, mask=mask)
+            for score, formula, (_, mask) in zip(scores, formulas, batch)
+        )
+    return candidates
 
 
 def add_best_candidate(candidates_by_formula, candidate):
@@ -88,6 +109,7 @@ def beamsearch_all(
     beam_size=5,
     formula_length=5,
     complexity_penalty=1.0,
+    score_batch_size=4096,
     device=None,
 ):
     device = resolve_device(device)
@@ -99,10 +121,12 @@ def beamsearch_all(
         neuron = activation_vectors[:, activation_index]
         samples = []
 
-        leaf_candidates = [
-            candidate_for(formula, mask, neuron, complexity_penalty)
-            for formula, mask in feature_vectors
-        ]
+        leaf_candidates = score_formula_masks(
+            feature_vectors,
+            neuron,
+            complexity_penalty,
+            score_batch_size,
+        )
         nonzero_features = [
             (candidate.formula, candidate.mask)
             for candidate in leaf_candidates
@@ -120,6 +144,7 @@ def beamsearch_all(
                 for candidate in beam
             }
 
+            pending_formula_masks = []
             for candidate in beam:
                 for feature_formula, feature_mask in nonzero_features:
                     for formula, mask in expand_candidate(
@@ -127,13 +152,24 @@ def beamsearch_all(
                         feature_formula,
                         feature_mask,
                     ):
-                        new_candidate = candidate_for(
-                            formula,
-                            mask,
-                            neuron,
-                            complexity_penalty,
-                        )
-                        add_best_candidate(candidates_by_formula, new_candidate)
+                        pending_formula_masks.append((formula, mask))
+                        if len(pending_formula_masks) >= score_batch_size:
+                            for new_candidate in score_formula_masks(
+                                pending_formula_masks,
+                                neuron,
+                                complexity_penalty,
+                                score_batch_size,
+                            ):
+                                add_best_candidate(candidates_by_formula, new_candidate)
+                            pending_formula_masks = []
+
+            for new_candidate in score_formula_masks(
+                pending_formula_masks,
+                neuron,
+                complexity_penalty,
+                score_batch_size,
+            ):
+                add_best_candidate(candidates_by_formula, new_candidate)
 
             beam = top_candidates(candidates_by_formula.values(), beam_size)
             for candidate in beam:
