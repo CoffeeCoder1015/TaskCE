@@ -1,12 +1,33 @@
+import torch
+
 from feature.formula import And, Not, Or
 
 
 def IoU(v1,v2):
     n = ( v1&v2 ).sum()
     d = ( v1|v2 ).sum()
-    if d == 0:
-        return d
-    return n/d
+    if d.item() == 0:
+        return 0.0
+    return (n.float() / d.float()).item()
+
+
+def resolve_device(device=None):
+    if device is not None:
+        return torch.device(device)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def to_binary_tensor(value, device):
+    return torch.as_tensor(value, dtype=torch.bool, device=device)
+
+
+def prepare_feature_vectors(feature_vectors, device):
+    return [
+        (formula, to_binary_tensor(binary_vector, device))
+        for formula, binary_vector in feature_vectors
+    ]
 
 
 def append_sample(samples, iou, feature_tracker, beam_size):
@@ -15,7 +36,10 @@ def append_sample(samples, iou, feature_tracker, beam_size):
     del samples[beam_size:]
 
 
-def beamsearch_all(feature_vectors,activation_vectors, beam_size=5, formula_length=5):
+def beamsearch_all(feature_vectors,activation_vectors, beam_size=5, formula_length=5, device=None):
+    device = resolve_device(device)
+    feature_vectors = prepare_feature_vectors(feature_vectors, device)
+    activation_vectors = to_binary_tensor(activation_vectors, device)
     acts_shape = activation_vectors.shape # [examples x neuron number]
     for n in range(acts_shape[1]):
         neuron = activation_vectors[:,n]
