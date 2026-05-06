@@ -117,5 +117,5 @@ print(
 
 beam_results = beamsearch_all(
     feature_vectors,
-    fine_pruned_acts.numpy(),
+    fine_pruned_acts,
 )
