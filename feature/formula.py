@@ -8,6 +8,9 @@ class Node:
     def flatten(self):
         raise NotImplementedError
 
+    def __len__(self):
+        raise NotImplementedError
+
 
 @dataclass(frozen=True)
 class Leaf(Node):
@@ -18,6 +21,9 @@ class Leaf(Node):
     def flatten(self):
         return f"{self.label}:{self.token}"
 
+    def __len__(self):
+        return 1
+
 
 @dataclass(frozen=True)
 class Not(Node):
@@ -25,6 +31,9 @@ class Not(Node):
 
     def flatten(self):
         return f"(NOT {self.child.flatten()})"
+
+    def __len__(self):
+        return 1 + len(self.child)
 
 
 @dataclass(frozen=True)
@@ -35,6 +44,9 @@ class And(Node):
     def flatten(self):
         return f"({self.left.flatten()} AND {self.right.flatten()})"
 
+    def __len__(self):
+        return len(self.left) + len(self.right)
+
 
 @dataclass(frozen=True)
 class Or(Node):
@@ -43,3 +55,6 @@ class Or(Node):
 
     def flatten(self):
         return f"({self.left.flatten()} OR {self.right.flatten()})"
+
+    def __len__(self):
+        return len(self.left) + len(self.right)
