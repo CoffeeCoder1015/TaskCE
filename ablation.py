@@ -8,6 +8,8 @@ from peft import PeftModel
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+import ablation_plotter
+
 CLASS_TOKEN_IDS = {
     "entailment": 806,
     "neutral": 25919,
@@ -399,6 +401,15 @@ def run_ablation_pipeline(
             iou_path,
         )
         print_ablation_comparison(good_res, bad_res, iou_res)
+        plot_paths = ablation_plotter.plot_ablation_results(
+            good_path,
+            bad_path,
+            iou_path,
+            output_dir,
+        )
+        print("Saved ablation plots:")
+        for name, path in plot_paths.items():
+            print(f"  {name}: {path}")
 
         weight_path = os.path.join(output_dir, "weight_contributions.csv")
         ranked_df.to_csv(weight_path, index=False)
