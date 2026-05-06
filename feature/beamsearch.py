@@ -58,10 +58,17 @@ def top_candidates(candidates, beam_size):
     return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)[:beam_size]
 
 
-def append_sample(samples, candidate, beam_size):
-    samples.append((candidate.score, candidate.formula.flatten()))
-    samples.sort(key=lambda sample: sample[0], reverse=True)
-    del samples[beam_size:]
+def pop_best_candidate(candidates_by_formula):
+    candidate = top_candidates(candidates_by_formula.values(), 1)[0]
+    del candidates_by_formula[candidate.formula]
+    return candidate
+
+
+def trim_candidate_queue(candidates_by_formula, beam_size):
+    return {
+        candidate.formula: candidate
+        for candidate in top_candidates(candidates_by_formula.values(), beam_size)
+    }
 
 
 def score_formula_masks(formula_masks, neuron, complexity_penalty, score_batch_size):
@@ -110,16 +117,18 @@ def beamsearch_all(
     formula_length=5,
     complexity_penalty=1.0,
     score_batch_size=4096,
+    max_expansions=None,
     device=None,
 ):
     device = resolve_device(device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     activation_vectors = to_binary_tensor(activation_vectors, device)
+    if max_expansions is None:
+        max_expansions = beam_size * max(0, formula_length - 1)
     results = []
 
     for activation_index in range(activation_vectors.shape[1]):
         neuron = activation_vectors[:, activation_index]
-        samples = []
 
         leaf_candidates = score_formula_masks(
             feature_vectors,
@@ -133,35 +142,35 @@ def beamsearch_all(
             if candidate.score > 0
         ]
 
-        beam = top_candidates(leaf_candidates, beam_size)
-        best_noncomp = beam[0] if beam else None
-        for candidate in beam:
-            append_sample(samples, candidate, beam_size)
+        best_candidates_by_formula = {}
+        for candidate in leaf_candidates:
+            add_best_candidate(best_candidates_by_formula, candidate)
 
-        for _ in range(formula_length - 1):
-            candidates_by_formula = {
-                candidate.formula: candidate
-                for candidate in beam
-            }
+        queue_by_formula = trim_candidate_queue(
+            best_candidates_by_formula,
+            beam_size,
+        )
+        best_noncomp = top_candidates(leaf_candidates, 1)[0] if leaf_candidates else None
+        expanded_formulas = set()
+        expansions = 0
+
+        while queue_by_formula and expansions < max_expansions:
+            candidate = pop_best_candidate(queue_by_formula)
+            if candidate.formula in expanded_formulas:
+                continue
+            expanded_formulas.add(candidate.formula)
+
+            if len(candidate.formula) >= formula_length:
+                continue
 
             pending_formula_masks = []
-            for candidate in beam:
-                for feature_formula, feature_mask in nonzero_features:
-                    for formula, mask in expand_candidate(
-                        candidate,
-                        feature_formula,
-                        feature_mask,
-                    ):
-                        pending_formula_masks.append((formula, mask))
-                        if len(pending_formula_masks) >= score_batch_size:
-                            for new_candidate in score_formula_masks(
-                                pending_formula_masks,
-                                neuron,
-                                complexity_penalty,
-                                score_batch_size,
-                            ):
-                                add_best_candidate(candidates_by_formula, new_candidate)
-                            pending_formula_masks = []
+            for feature_formula, feature_mask in nonzero_features:
+                for formula, mask in expand_candidate(
+                    candidate,
+                    feature_formula,
+                    feature_mask,
+                ):
+                    pending_formula_masks.append((formula, mask))
 
             for new_candidate in score_formula_masks(
                 pending_formula_masks,
@@ -169,13 +178,19 @@ def beamsearch_all(
                 complexity_penalty,
                 score_batch_size,
             ):
-                add_best_candidate(candidates_by_formula, new_candidate)
+                add_best_candidate(best_candidates_by_formula, new_candidate)
+                if new_candidate.formula not in expanded_formulas:
+                    add_best_candidate(queue_by_formula, new_candidate)
 
-            beam = top_candidates(candidates_by_formula.values(), beam_size)
-            for candidate in beam:
-                append_sample(samples, candidate, beam_size)
+            queue_by_formula = trim_candidate_queue(queue_by_formula, beam_size)
+            expansions += 1
 
-        best = beam[0] if beam else None
+        best_candidates = top_candidates(best_candidates_by_formula.values(), beam_size)
+        best = best_candidates[0] if best_candidates else None
+        samples = [
+            (candidate.score, candidate.formula.flatten())
+            for candidate in best_candidates
+        ]
         if best is not None:
             print(
                 f"Neuron {activation_index}: "
