@@ -57,9 +57,10 @@ def append_sample(samples, candidate, beam_size):
     del samples[beam_size:]
 
 
-def candidate_for(formula, mask, neuron):
+def candidate_for(formula, mask, neuron, complexity_penalty):
+    raw_score = iou(mask, neuron)
     return BeamCandidate(
-        score=iou(mask, neuron),
+        score=(complexity_penalty ** (len(formula) - 1)) * raw_score,
         formula=formula,
         mask=mask,
     )
@@ -86,6 +87,7 @@ def beamsearch_all(
     activation_vectors,
     beam_size=5,
     formula_length=5,
+    complexity_penalty=1.0,
     device=None,
 ):
     device = resolve_device(device)
@@ -98,7 +100,7 @@ def beamsearch_all(
         samples = []
 
         leaf_candidates = [
-            candidate_for(formula, mask, neuron)
+            candidate_for(formula, mask, neuron, complexity_penalty)
             for formula, mask in feature_vectors
         ]
         nonzero_features = [
@@ -125,7 +127,12 @@ def beamsearch_all(
                         feature_formula,
                         feature_mask,
                     ):
-                        new_candidate = candidate_for(formula, mask, neuron)
+                        new_candidate = candidate_for(
+                            formula,
+                            mask,
+                            neuron,
+                            complexity_penalty,
+                        )
                         add_best_candidate(candidates_by_formula, new_candidate)
 
             beam = top_candidates(candidates_by_formula.values(), beam_size)
