@@ -36,7 +36,13 @@ def append_sample(samples, iou, feature_tracker, beam_size):
     del samples[beam_size:]
 
 
-def beamsearch_all(feature_vectors,activation_vectors, beam_size=5, formula_length=5, device=None):
+def beamsearch_all(
+    feature_vectors,
+    activation_vectors,
+    beam_size=5,
+    formula_length=5,
+    device=None,
+):
     device = resolve_device(device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     activation_vectors = to_binary_tensor(activation_vectors, device)

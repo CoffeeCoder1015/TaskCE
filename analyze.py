@@ -115,7 +115,11 @@ print(
     summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
 )
 
-beam_results = beamsearch_all(
+BEAM_SIZE = 10
+MAX_FORMULA_LENGTH = 6
+beamsearch_all(
     feature_vectors,
     fine_pruned_acts,
+    beam_size=BEAM_SIZE,
+    formula_length=MAX_FORMULA_LENGTH,
 )
