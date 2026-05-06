@@ -120,12 +120,14 @@ print(
 BEAM_SIZE = 10
 MAX_FORMULA_LENGTH = 6
 COMPLEXITY_PENALTY = 1.00
+SCORE_BATCH_SIZE = 128
 beam_results = beamsearch_all(
     feature_vectors,
     fine_pruned_acts,
     beam_size=BEAM_SIZE,
     formula_length=MAX_FORMULA_LENGTH,
     complexity_penalty=COMPLEXITY_PENALTY,
+    score_batch_size=SCORE_BATCH_SIZE,
 )
 
 print("Beam search results:")
