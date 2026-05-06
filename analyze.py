@@ -114,24 +114,60 @@ def get_classification_weights(model):
     return weights
 
 
-def build_beam_results_dataframe(beam_results, neuron_ids, classification_weights):
+def build_beam_results_dataframe(
+    beam_results,
+    neuron_ids,
+    classification_weights,
+    total_neurons=None,
+    activation_counts=None,
+):
     records = []
+    searched_neuron_ids = set()
+
+    def activation_count_for(neuron_id):
+        if activation_counts is None:
+            return None
+        return int(activation_counts[neuron_id].item())
+
+    def weight_record(neuron_id):
+        weight_ent, weight_neut, weight_contr = classification_weights[neuron_id].tolist()
+        return {
+            "weight_ent": float(weight_ent),
+            "weight_neut": float(weight_neut),
+            "weight_contr": float(weight_contr),
+        }
+
     for result in beam_results:
         original_neuron_id = int(neuron_ids[result.activation_index])
+        searched_neuron_ids.add(original_neuron_id)
         formula, iou = result.best
-        weight_ent, weight_neut, weight_contr = classification_weights[
-            original_neuron_id
-        ].tolist()
         records.append(
             {
                 "neuron": original_neuron_id,
                 "iou": float(iou),
                 "formula": formula,
-                "weight_ent": float(weight_ent),
-                "weight_neut": float(weight_neut),
-                "weight_contr": float(weight_contr),
+                **weight_record(original_neuron_id),
+                "activation_count": activation_count_for(original_neuron_id),
+                "was_pruned": False,
+                "prune_reason": "",
             }
         )
+
+    if total_neurons is not None:
+        for neuron_id in range(int(total_neurons)):
+            if neuron_id in searched_neuron_ids:
+                continue
+            records.append(
+                {
+                    "neuron": neuron_id,
+                    "iou": 0.0,
+                    "formula": "LOW_ACTS_PRUNED",
+                    **weight_record(neuron_id),
+                    "activation_count": activation_count_for(neuron_id),
+                    "was_pruned": True,
+                    "prune_reason": "low_acts",
+                }
+            )
 
     return pd.DataFrame(
         records,
@@ -142,6 +178,9 @@ def build_beam_results_dataframe(beam_results, neuron_ids, classification_weight
             "weight_ent",
             "weight_neut",
             "weight_contr",
+            "activation_count",
+            "was_pruned",
+            "prune_reason",
         ],
     ).sort_values("iou", ascending=False, ignore_index=True)
 
@@ -243,7 +282,7 @@ def main():
     max_formula_length = 6
     complexity_penalty = 1.00
     score_batch_size = 4096
-    beamsearch_workers = 2
+    beamsearch_workers = 8
     beam_results = beamsearch_all(
         feature_vectors,
         fine_pruned_acts,
@@ -284,6 +323,8 @@ def main():
         beam_results,
         fine_neuron_ids,
         classification_weights,
+        total_neurons=fine_binary_acts.shape[1],
+        activation_counts=fine_binary_acts.sum(dim=0),
     )
     beam_results_path = save_beam_results_dataframe(beam_df)
 
