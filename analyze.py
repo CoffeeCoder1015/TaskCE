@@ -5,7 +5,7 @@ from feature import (
     count_model_token_ids,
     top_token_counts,
 )
-from feature.beamsearch import beam_search
+from feature.beamsearch import beamsearch_all
 from feature.construct import construct_label_vocab_matrices, construct_vectors
 from capture import Capture, CaptureConfig
 from capture.postprocessing import prune_min_acts, threshold
@@ -115,20 +115,7 @@ print(
     summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
 )
 
-beam_results = beam_search(
+beam_results = beamsearch_all(
     feature_vectors,
     fine_pruned_acts.numpy(),
-    beam_size=5,
-    formula_length=5,
 )
-
-print("Best beam search formula per neuron:")
-for rank, result in enumerate(beam_results, start=1):
-    original_neuron_id = int(fine_neuron_ids[result.activation_index])
-    print(
-        f"{rank}. score={result.score:.4f} "
-        f"corr={result.correlation:.4f} "
-        f"activation={original_neuron_id} "
-        f"support={result.support} "
-        f"formula={result.formula.flatten()}"
-    )
