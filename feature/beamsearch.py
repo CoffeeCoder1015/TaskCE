@@ -1,4 +1,7 @@
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
+import heapq
+import multiprocessing as mp
 
 import torch
 
@@ -17,7 +20,6 @@ class BeamSearchResult:
     activation_index: int
     best: tuple[str, float]
     best_noncomp: tuple[str, float]
-    samples: list[tuple[float, str]]
 
 
 def iou(v1, v2):
@@ -54,21 +56,18 @@ def prepare_feature_vectors(feature_vectors, device):
     ]
 
 
-def top_candidates(candidates, beam_size):
-    return sorted(candidates, key=lambda candidate: candidate.score, reverse=True)[:beam_size]
-
-
-def pop_best_candidate(candidates_by_formula):
-    candidate = top_candidates(candidates_by_formula.values(), 1)[0]
-    del candidates_by_formula[candidate.formula]
-    return candidate
-
-
-def trim_candidate_queue(candidates_by_formula, beam_size):
-    return {
-        candidate.formula: candidate
-        for candidate in top_candidates(candidates_by_formula.values(), beam_size)
-    }
+def activation_index_chunks(total_activations, num_workers):
+    if total_activations == 0:
+        return []
+    worker_count = min(max(1, num_workers), total_activations)
+    chunk_size, remainder = divmod(total_activations, worker_count)
+    chunks = []
+    start = 0
+    for worker_index in range(worker_count):
+        stop = start + chunk_size + (1 if worker_index < remainder else 0)
+        chunks.append((start, stop))
+        start = stop
+    return chunks
 
 
 def score_formula_masks(formula_masks, neuron, complexity_penalty, score_batch_size):
@@ -94,12 +93,6 @@ def score_formula_masks(formula_masks, neuron, complexity_penalty, score_batch_s
     return candidates
 
 
-def add_best_candidate(candidates_by_formula, candidate):
-    existing = candidates_by_formula.get(candidate.formula)
-    if existing is None or candidate.score > existing.score:
-        candidates_by_formula[candidate.formula] = candidate
-
-
 def expand_candidate(candidate, feature_formula, feature_mask):
     formula = candidate.formula
     mask = candidate.mask
@@ -110,9 +103,10 @@ def expand_candidate(candidate, feature_formula, feature_mask):
     ]
 
 
-def beamsearch_all(
+def beamsearch_chunk(
     feature_vectors,
     activation_vectors,
+    activation_indices,
     beam_size=5,
     formula_length=5,
     complexity_penalty=1.0,
@@ -127,8 +121,8 @@ def beamsearch_all(
         max_expansions = beam_size * max(0, formula_length - 1)
     results = []
 
-    for activation_index in range(activation_vectors.shape[1]):
-        neuron = activation_vectors[:, activation_index]
+    for local_activation_index, activation_index in enumerate(activation_indices):
+        neuron = activation_vectors[:, local_activation_index]
 
         leaf_candidates = score_formula_masks(
             feature_vectors,
@@ -142,20 +136,26 @@ def beamsearch_all(
             if candidate.score > 0
         ]
 
-        best_candidates_by_formula = {}
-        for candidate in leaf_candidates:
-            add_best_candidate(best_candidates_by_formula, candidate)
-
-        queue_by_formula = trim_candidate_queue(
-            best_candidates_by_formula,
-            beam_size,
-        )
-        best_noncomp = top_candidates(leaf_candidates, 1)[0] if leaf_candidates else None
+        best = max(leaf_candidates, key=lambda candidate: candidate.score, default=None)
+        best_noncomp = best
+        frontier = []
+        queued_formulas = set()
         expanded_formulas = set()
         expansions = 0
+        next_queue_id = 0
 
-        while queue_by_formula and expansions < max_expansions:
-            candidate = pop_best_candidate(queue_by_formula)
+        for candidate in leaf_candidates:
+            heapq.heappush(frontier, (-candidate.score, next_queue_id, candidate))
+            queued_formulas.add(candidate.formula)
+            next_queue_id += 1
+        if len(frontier) > beam_size:
+            frontier = heapq.nsmallest(beam_size, frontier)
+            heapq.heapify(frontier)
+            queued_formulas = {entry[2].formula for entry in frontier}
+
+        while frontier and expansions < max_expansions:
+            _, _, candidate = heapq.heappop(frontier)
+            queued_formulas.discard(candidate.formula)
             if candidate.formula in expanded_formulas:
                 continue
             expanded_formulas.add(candidate.formula)
@@ -178,19 +178,25 @@ def beamsearch_all(
                 complexity_penalty,
                 score_batch_size,
             ):
-                add_best_candidate(best_candidates_by_formula, new_candidate)
-                if new_candidate.formula not in expanded_formulas:
-                    add_best_candidate(queue_by_formula, new_candidate)
+                if best is None or new_candidate.score > best.score:
+                    best = new_candidate
+                if (
+                    new_candidate.formula not in expanded_formulas
+                    and new_candidate.formula not in queued_formulas
+                ):
+                    heapq.heappush(
+                        frontier,
+                        (-new_candidate.score, next_queue_id, new_candidate),
+                    )
+                    queued_formulas.add(new_candidate.formula)
+                    next_queue_id += 1
 
-            queue_by_formula = trim_candidate_queue(queue_by_formula, beam_size)
+            if len(frontier) > beam_size:
+                frontier = heapq.nsmallest(beam_size, frontier)
+                heapq.heapify(frontier)
+                queued_formulas = {entry[2].formula for entry in frontier}
             expansions += 1
 
-        best_candidates = top_candidates(best_candidates_by_formula.values(), beam_size)
-        best = best_candidates[0] if best_candidates else None
-        samples = [
-            (candidate.score, candidate.formula.flatten())
-            for candidate in best_candidates
-        ]
         if best is not None:
             print(
                 f"Neuron {activation_index}: "
@@ -208,11 +214,77 @@ def beamsearch_all(
                     best_noncomp.formula.flatten(),
                     best_noncomp.score,
                 ) if best_noncomp else ("", 0.0),
-                samples=samples,
             )
         )
 
     return results
+
+
+def beamsearch_worker(args):
+    return beamsearch_chunk(*args)
+
+
+def beamsearch_all(
+    feature_vectors,
+    activation_vectors,
+    beam_size=5,
+    formula_length=5,
+    complexity_penalty=1.0,
+    score_batch_size=4096,
+    max_expansions=None,
+    num_workers=1,
+    device=None,
+):
+    if max_expansions is None:
+        max_expansions = beam_size * max(0, formula_length - 1)
+
+    if num_workers <= 1:
+        activation_vectors = torch.as_tensor(activation_vectors)
+        return beamsearch_chunk(
+            feature_vectors,
+            activation_vectors,
+            range(activation_vectors.shape[1]),
+            beam_size,
+            formula_length,
+            complexity_penalty,
+            score_batch_size,
+            max_expansions,
+            device,
+        )
+
+    activation_vectors = to_binary_tensor(activation_vectors, torch.device("cpu"))
+    feature_vectors = prepare_feature_vectors(feature_vectors, torch.device("cpu"))
+    chunks = activation_index_chunks(activation_vectors.shape[1], num_workers)
+    if not chunks:
+        return []
+    worker_args = [
+        (
+            feature_vectors,
+            activation_vectors[:, start:stop],
+            range(start, stop),
+            beam_size,
+            formula_length,
+            complexity_penalty,
+            score_batch_size,
+            max_expansions,
+            device,
+        )
+        for start, stop in chunks
+    ]
+
+    context = mp.get_context("spawn")
+    with ProcessPoolExecutor(
+        max_workers=len(worker_args),
+        mp_context=context,
+    ) as executor:
+        result_chunks = list(executor.map(beamsearch_worker, worker_args))
+
+    results = [
+        result
+        for chunk in result_chunks
+        for result in chunk
+    ]
+    return sorted(results, key=lambda result: result.activation_index)
 
 
 # Backward-compatible name used in older notes.
