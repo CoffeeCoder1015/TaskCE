@@ -119,11 +119,13 @@ print(
 
 BEAM_SIZE = 10
 MAX_FORMULA_LENGTH = 6
+COMPLEXITY_PENALTY = 1.00
 beam_results = beamsearch_all(
     feature_vectors,
     fine_pruned_acts,
     beam_size=BEAM_SIZE,
     formula_length=MAX_FORMULA_LENGTH,
+    complexity_penalty=COMPLEXITY_PENALTY,
 )
 
 print("Beam search results:")
