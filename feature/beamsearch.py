@@ -93,6 +93,9 @@ def beamsearch_all(feature_vectors,activation_vectors, beam_size=5, formula_leng
                 new_queue = []
                 i+=1
 
+        print("Final best iou:",best_iou)
+        for s in samples:
+            print(s)
         exit() # Single iteration for testing
 
         
