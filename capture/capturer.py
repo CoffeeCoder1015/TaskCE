@@ -1,5 +1,7 @@
 import gc
 import os
+from dataclasses import dataclass
+from typing import Any
 
 import torch
 from peft import PeftModel
@@ -7,6 +9,33 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from capture.captureConfig import CaptureConfig
+
+@dataclass
+class CapturedResults:
+    states: torch.Tensor
+    labels: Any
+    layer: str
+    layer_index: int | None
+    model_id: str
+    lora_path: str | None
+
+    def __getitem__(self, key):
+        return getattr(self, key)
+
+    def __repr__(self):
+        state_summary = (
+            f"Tensor(shape={tuple(self.states.shape)}, "
+            f"dtype={self.states.dtype}, device={self.states.device})"
+        )
+        return (
+            f"{type(self).__name__}("
+            f"states={state_summary}, "
+            f"labels={len(self.labels)} labels, "
+            f"layer={self.layer!r}, "
+            f"layer_index={self.layer_index!r}, "
+            f"model_id={self.model_id!r}, "
+            f"lora_path={self.lora_path!r})"
+        )
 
 
 def resolve_capture_layer(model, layer):
@@ -114,14 +143,14 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
         else:
             states = torch.empty((0, 0), dtype=torch.float32)
 
-        return {
-            "states": states,
-            "labels": labels,
-            "layer": resolved_layer_path,
-            "layer_index": resolved_layer_index,
-            "model_id": model_id,
-            "lora_path": lora_path,
-        }
+        return CapturedResults(
+            states=states,
+            labels=labels,
+            layer=resolved_layer_path,
+            layer_index=resolved_layer_index,
+            model_id=model_id,
+            lora_path=lora_path,
+        )
     finally:
         # The hook must always be removed so future captures do not append stale values.
         hook_handle.remove()
