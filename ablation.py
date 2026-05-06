@@ -92,7 +92,14 @@ def print_stats(df):
     print("\nTop 10 formulas:")
     print(df["formula"].value_counts().head(10).to_string())
 
-    garbage_mask = df["formula"].isin(GARBAGE_FEATURES)
+    pruned_mask = (
+        df["was_pruned"].astype(bool)
+        if "was_pruned" in df.columns
+        else pd.Series(False, index=df.index)
+    )
+    garbage_mask = df["formula"].isin(GARBAGE_FEATURES) | pruned_mask
+    if pruned_mask.any():
+        print(f"\nPruned low-activation neurons recovered: {int(pruned_mask.sum())}")
     good = df[~garbage_mask & (df["iou"] >= ABLATION_IOU_MIN)].copy()
     bad = df[garbage_mask | (df["iou"] < ABLATION_IOU_MIN)].copy()
 
