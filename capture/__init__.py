@@ -1,4 +1,4 @@
 from .captureConfig import CaptureConfig
-from .capturer import Capture
+from .capturer import Capture, CapturedResults
 
-__all__ = ["Capture", "CaptureConfig"]
+__all__ = ["Capture", "CaptureConfig", "CapturedResults"]
