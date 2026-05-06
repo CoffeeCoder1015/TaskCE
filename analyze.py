@@ -33,7 +33,7 @@ token_counts = count_model_token_ids(
     tokenizer,
     batch_size=512,
 )
-top_token_ids = top_token_counts(token_counts, tokenizer, top_k=2_000)
+top_token_ids = top_token_counts(token_counts, tokenizer, top_k=4_000)
 
 label_vocab_matrices = construct_label_vocab_matrices(
     formatted_dataset,
@@ -93,9 +93,11 @@ activations_fine = capture_results["snli"]["finetuned"]
 print(activations_base)
 print(activations_fine)
 
-base_binary_acts = threshold(activations_base.states)
+
+ALPHA = 0.055
+base_binary_acts = threshold(activations_base.states, alpha=ALPHA)
 base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
-fine_binary_acts = threshold(activations_fine.states)
+fine_binary_acts = threshold(activations_fine.states, alpha=ALPHA)
 fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
 
 def summarize_postprocessing(binary_acts, pruned_acts, neuron_ids):
@@ -117,9 +119,28 @@ print(
 
 BEAM_SIZE = 10
 MAX_FORMULA_LENGTH = 6
-beamsearch_all(
+beam_results = beamsearch_all(
     feature_vectors,
     fine_pruned_acts,
     beam_size=BEAM_SIZE,
     formula_length=MAX_FORMULA_LENGTH,
 )
+
+print("Beam search results:")
+for result in beam_results:
+    original_neuron_id = int(fine_neuron_ids[result.activation_index])
+    best_formula, best_iou = result.best
+    best_noncomp_formula, best_noncomp_iou = result.best_noncomp
+
+    print(
+        f"Neuron {original_neuron_id}: "
+        f"best_iou={best_iou:.4f} "
+        f"best={best_formula}"
+    )
+    print(
+        f"  best_noncomp_iou={best_noncomp_iou:.4f} "
+        f"best_noncomp={best_noncomp_formula}"
+    )
+    print("  samples:")
+    for sample_iou, sample_formula in result.samples:
+        print(f"    {sample_iou:.4f} {sample_formula}")
