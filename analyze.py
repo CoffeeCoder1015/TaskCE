@@ -8,6 +8,7 @@ from feature import (
 from feature.beamsearch import beam_search
 from feature.construct import construct_label_vocab_matrices, construct_vectors
 from capture import Capture, CaptureConfig
+from capture.postprocessing import prune_min_acts, threshold
 
 def format_snli_text(example):
     return {"premise": example["premise"], "hypothesis": example["hypothesis"]}
@@ -89,20 +90,45 @@ capture_results = Capture(
 
 activations_base = capture_results["snli"]["base"]
 activations_fine = capture_results["snli"]["finetuned"]
+print(activations_base)
+print(activations_fine)
+
+base_binary_acts = threshold(activations_base.states)
+base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
+fine_binary_acts = threshold(activations_fine.states)
+fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
+
+def summarize_postprocessing(binary_acts, pruned_acts, neuron_ids):
+    return {
+        "binary_shape": tuple(binary_acts.shape),
+        "pruned_shape": tuple(pruned_acts.shape),
+        "kept_neuron_count": int(neuron_ids.numel()),
+        "kept_neuron_preview": neuron_ids[:20].tolist(),
+    }
+
+print(
+    "Base postprocessing:",
+    summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),
+)
+print(
+    "Finetuned postprocessing:",
+    summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
+)
 
 beam_results = beam_search(
     feature_vectors,
-    activations_fine,
+    fine_pruned_acts.numpy(),
     beam_size=5,
     formula_length=5,
 )
 
 print("Best beam search formula per neuron:")
 for rank, result in enumerate(beam_results, start=1):
+    original_neuron_id = int(fine_neuron_ids[result.activation_index])
     print(
         f"{rank}. score={result.score:.4f} "
         f"corr={result.correlation:.4f} "
-        f"activation={result.activation_index} "
+        f"activation={original_neuron_id} "
         f"support={result.support} "
         f"formula={result.formula.flatten()}"
     )
