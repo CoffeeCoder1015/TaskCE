@@ -1,13 +1,6 @@
-from attr import dataclass
-import torch
+import heapq
 
-@dataclass
-class SearchConfig:
-    beam_size=5
-    formula_length=5
-    complexity_penalty=1.0
-    score_batch_size=4096
-    max_expansions=None
+import torch
 
 def batched_iou(neuron,binary_vecs):
     intersections = (binary_vecs & neuron).sum(dim=1)
@@ -53,10 +46,32 @@ def prepare_feature_vectors(feature_vectors, device):
         for formula, binary_vector in feature_vectors
     ]
 
-def Search(neuron,feature_vectors,config=SearchConfig()):
+def Search(neuron,feature_vectors):
     device = resolve_device()
-    print(neuron,neuron.shape)
-    print(feature_vectors[0],feature_vectors[0][1].shape,len(feature_vectors))
+    print("Neuron shape:",neuron.shape)
+    print("Feature shape:",feature_vectors[0][1].shape)
     scored_features = score_formulas(to_binary_tensor(neuron,device),prepare_feature_vectors(feature_vectors,device),4096)
-    print(scored_features[0],len(scored_features))
+    nonzero_features = [feature for feature in scored_features if feature[0] > 0]
+    print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
     
+    beam_size = 30
+    formula_length = 6
+    queue = []
+    # Load queue
+    queue_id = 0
+    for item in nonzero_features:
+        if len(queue) >= beam_size:
+            break
+        heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+        queue_id+=1
+    
+    max_expansions = beam_size * max(0, formula_length - 1)
+    expansions = 0
+    while queue and expansions < max_expansions:
+        _, _, formula, vector = heapq.heappop(queue)
+        print(formula,vector)
+
+def search_worker(neurons,feature_vectors):
+    shape = neurons.shape
+    for i in range(shape[1]):
+        Search(neurons[:,i],feature_vectors)
