@@ -1,6 +1,7 @@
 import heapq
 
 import torch
+from feature.formula import And, Not, Or
 
 def batched_iou(neuron,binary_vecs):
     intersections = (binary_vecs & neuron).sum(dim=1)
@@ -46,11 +47,19 @@ def prepare_feature_vectors(feature_vectors, device):
         for formula, binary_vector in feature_vectors
     ]
 
+def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
+    return [
+        (And(left=current_formula, right=feature_formula), current_vector & feature_vector),
+        (Or(left=current_formula, right=feature_formula), current_vector | feature_vector),
+        (And(left=current_formula, right=Not(feature_formula)), current_vector & ~feature_vector),
+    ]
+
 def Search(neuron,feature_vectors):
     device = resolve_device()
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    scored_features = score_formulas(to_binary_tensor(neuron,device),prepare_feature_vectors(feature_vectors,device),4096)
+    neuron = to_binary_tensor(neuron,device)
+    scored_features = score_formulas(neuron,prepare_feature_vectors(feature_vectors,device),4096)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
     
@@ -67,9 +76,35 @@ def Search(neuron,feature_vectors):
     
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
+    visited = set()
     while queue and expansions < max_expansions:
-        _, _, formula, vector = heapq.heappop(queue)
-        print(formula,vector)
+        iou, _, formula, vector = heapq.heappop(queue)
+        print(iou,formula)
+
+        # Check visit
+        vector_cpu = vector.cpu()
+        if vector_cpu in visited:
+            print("^ Visited")
+            continue
+        visited.add(vector_cpu)
+
+        neighbors = []
+        for neighbor_formula, neighbor_vector in nonzero_features:
+            for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
+                # Early skip
+                if n[1].cpu() in visited:
+                    continue
+                neighbors.append(n)
+            
+        scored_neighbors = score_formulas(neuron,neighbors,4096)
+        queue_id = 0
+        for item in scored_neighbors:
+            heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+            queue_id+=1
+        
+        if len(queue) > beam_size:
+            queue = heapq.nsmallest(beam_size, queue)
+            heapq.heapify(queue)
 
 def search_worker(neurons,feature_vectors):
     shape = neurons.shape
