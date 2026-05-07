@@ -116,7 +116,111 @@ def expand_candidate(candidate, feature_formula, feature_mask):
     ]
 
 
-def beamsearch_chunk(
+def beamsearch_search(
+    feature_vectors,
+    neuron,
+    beam_size=5,
+    formula_length=5,
+    complexity_penalty=1.0,
+    score_batch_size=4096,
+    max_expansions=None,
+):
+    if max_expansions is None:
+        max_expansions = beam_size * max(0, formula_length - 1)
+
+    leaf_candidates = score_formula_masks(
+        feature_vectors,
+        neuron,
+        complexity_penalty,
+        score_batch_size,
+    )
+    nonzero_candidates = [
+        candidate for candidate in leaf_candidates if candidate.score > 0
+    ]
+    nonzero_features = [
+        (candidate.formula, candidate.mask)
+        for candidate in nonzero_candidates
+    ]
+
+    best = max(leaf_candidates, key=lambda candidate: candidate.score, default=None)
+    best_noncomp = best
+    frontier = []
+    queued_formulas = set()
+    expanded_formulas = set()
+    expansions = 0
+    next_queue_id = 0
+
+    for candidate in nonzero_candidates:
+        heapq.heappush(frontier, (-candidate.score, next_queue_id, candidate))
+        queued_formulas.add(candidate.formula)
+        next_queue_id += 1
+    if len(frontier) > beam_size:
+        frontier = heapq.nsmallest(beam_size, frontier)
+        heapq.heapify(frontier)
+        queued_formulas = {entry[2].formula for entry in frontier}
+
+    while frontier and expansions < max_expansions:
+        _, _, candidate = heapq.heappop(frontier)
+        queued_formulas.discard(candidate.formula)
+        if candidate.formula in expanded_formulas:
+            continue
+        expanded_formulas.add(candidate.formula)
+
+        if len(candidate.formula) >= formula_length:
+            continue
+
+        pending_formula_masks = []
+        for feature_formula, feature_mask in nonzero_features:
+            for formula, mask in expand_candidate(
+                candidate,
+                feature_formula,
+                feature_mask,
+            ):
+                pending_formula_masks.append((formula, mask))
+
+        for new_candidate in score_formula_masks(
+            pending_formula_masks,
+            neuron,
+            complexity_penalty,
+            score_batch_size,
+        ):
+            if best is None or new_candidate.score > best.score:
+                best = new_candidate
+            if (
+                new_candidate.formula not in expanded_formulas
+                and new_candidate.formula not in queued_formulas
+            ):
+                heapq.heappush(
+                    frontier,
+                    (-new_candidate.score, next_queue_id, new_candidate),
+                )
+                queued_formulas.add(new_candidate.formula)
+                next_queue_id += 1
+
+        if len(frontier) > beam_size:
+            frontier = heapq.nsmallest(beam_size, frontier)
+            heapq.heapify(frontier)
+            queued_formulas = {entry[2].formula for entry in frontier}
+        expansions += 1
+
+    return best, best_noncomp
+
+
+def format_beamsearch_result(activation_index, best, best_noncomp):
+    return BeamSearchResult(
+        activation_index=activation_index,
+        best=(
+            best.formula.flatten(),
+            best.score,
+        ) if best else ("", 0.0),
+        best_noncomp=(
+            best_noncomp.formula.flatten(),
+            best_noncomp.score,
+        ) if best_noncomp else ("", 0.0),
+    )
+
+
+def beamsearch_worker(
     feature_vectors,
     activation_vectors,
     activation_indices,
@@ -130,113 +234,31 @@ def beamsearch_chunk(
     device = resolve_device(device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     activation_vectors = to_binary_tensor(activation_vectors, device)
-    if max_expansions is None:
-        max_expansions = beam_size * max(0, formula_length - 1)
     results = []
 
     for local_activation_index, activation_index in enumerate(activation_indices):
-        neuron = activation_vectors[:, local_activation_index]
-
-        leaf_candidates = score_formula_masks(
+        best, best_noncomp = beamsearch_search(
             feature_vectors,
-            neuron,
+            activation_vectors[:, local_activation_index],
+            beam_size,
+            formula_length,
             complexity_penalty,
             score_batch_size,
+            max_expansions,
         )
-        nonzero_candidates = [
-            candidate for candidate in leaf_candidates if candidate.score > 0
-        ]
-        nonzero_features = [
-            (candidate.formula, candidate.mask)
-            for candidate in nonzero_candidates
-        ]
-
-        best = max(leaf_candidates, key=lambda candidate: candidate.score, default=None)
-        best_noncomp = best
-        frontier = []
-        queued_formulas = set()
-        expanded_formulas = set()
-        expansions = 0
-        next_queue_id = 0
-
-        for candidate in nonzero_candidates:
-            heapq.heappush(frontier, (-candidate.score, next_queue_id, candidate))
-            queued_formulas.add(candidate.formula)
-            next_queue_id += 1
-        if len(frontier) > beam_size:
-            frontier = heapq.nsmallest(beam_size, frontier)
-            heapq.heapify(frontier)
-            queued_formulas = {entry[2].formula for entry in frontier}
-
-        while frontier and expansions < max_expansions:
-            _, _, candidate = heapq.heappop(frontier)
-            queued_formulas.discard(candidate.formula)
-            if candidate.formula in expanded_formulas:
-                continue
-            expanded_formulas.add(candidate.formula)
-
-            if len(candidate.formula) >= formula_length:
-                continue
-
-            pending_formula_masks = []
-            for feature_formula, feature_mask in nonzero_features:
-                for formula, mask in expand_candidate(
-                    candidate,
-                    feature_formula,
-                    feature_mask,
-                ):
-                    pending_formula_masks.append((formula, mask))
-
-            for new_candidate in score_formula_masks(
-                pending_formula_masks,
-                neuron,
-                complexity_penalty,
-                score_batch_size,
-            ):
-                if best is None or new_candidate.score > best.score:
-                    best = new_candidate
-                if (
-                    new_candidate.formula not in expanded_formulas
-                    and new_candidate.formula not in queued_formulas
-                ):
-                    heapq.heappush(
-                        frontier,
-                        (-new_candidate.score, next_queue_id, new_candidate),
-                    )
-                    queued_formulas.add(new_candidate.formula)
-                    next_queue_id += 1
-
-            if len(frontier) > beam_size:
-                frontier = heapq.nsmallest(beam_size, frontier)
-                heapq.heapify(frontier)
-                queued_formulas = {entry[2].formula for entry in frontier}
-            expansions += 1
-
         if best is not None:
             print(
                 f"Neuron {activation_index}: "
                 f"best_iou={best.score:.4f} "
                 f"best={best.formula.flatten()}"
             )
-        results.append(
-            BeamSearchResult(
-                activation_index=activation_index,
-                best=(
-                    best.formula.flatten(),
-                    best.score,
-                ) if best else ("", 0.0),
-                best_noncomp=(
-                    best_noncomp.formula.flatten(),
-                    best_noncomp.score,
-                ) if best_noncomp else ("", 0.0),
-            )
-        )
+        results.append(format_beamsearch_result(activation_index, best, best_noncomp))
 
     return results
 
 
-def beamsearch_worker(args):
-    return beamsearch_chunk(*args)
+def beamsearch_worker_from_args(args):
+    return beamsearch_worker(*args)
 
 
 def beamsearch_all(
@@ -255,7 +277,7 @@ def beamsearch_all(
 
     if num_workers <= 1:
         activation_vectors = torch.as_tensor(activation_vectors)
-        return beamsearch_chunk(
+        return beamsearch_worker(
             feature_vectors,
             activation_vectors,
             range(activation_vectors.shape[1]),
@@ -289,7 +311,7 @@ def beamsearch_all(
 
     context = mp.get_context("spawn")
     with context.Pool(processes=len(worker_args)) as pool:
-        result_chunks = pool.map(beamsearch_worker, worker_args)
+        result_chunks = pool.map(beamsearch_worker_from_args, worker_args)
 
     results = [
         result
