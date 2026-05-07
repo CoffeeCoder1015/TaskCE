@@ -32,12 +32,31 @@ def score_formulas(neuron,formulas_vectors,batch_size):
             device=iou.device,
         )
         scores = (iou * length_penalties).tolist()
-        candidates.extend(zip(-scores,formulas,binary_vectors))
+        candidates.extend(zip(scores,formulas,binary_vectors))
     return candidates
 
+def resolve_device(device=None):
+    if device is not None:
+        return torch.device(device)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    return torch.device("cpu")
+
+
+def to_binary_tensor(value, device):
+    return torch.as_tensor(value, dtype=torch.bool, device=device)
+
+
+def prepare_feature_vectors(feature_vectors, device):
+    return [
+        (formula, to_binary_tensor(binary_vector, device))
+        for formula, binary_vector in feature_vectors
+    ]
+
 def Search(neuron,feature_vectors,config=SearchConfig()):
-    print(neuron)
-    print(feature_vectors)
-    scored_features = score_formulas(neuron,feature_vectors,4096)
-    print(scored_features)
+    device = resolve_device()
+    print(neuron,neuron.shape)
+    print(feature_vectors[0],feature_vectors[0][1].shape,len(feature_vectors))
+    scored_features = score_formulas(to_binary_tensor(neuron,device),prepare_feature_vectors(feature_vectors,device),4096)
+    print(scored_features[0],len(scored_features))
     

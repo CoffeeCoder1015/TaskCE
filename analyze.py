@@ -276,7 +276,7 @@ print(
     summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
 )
 
-Search(fine_pruned_acts[0],feature_vectors)
+Search(fine_pruned_acts[:,0],feature_vectors)
 
 # beam_size = 30
 # max_formula_length = 6
