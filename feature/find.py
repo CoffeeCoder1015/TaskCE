@@ -6,7 +6,17 @@ from itertools import chain
 import numpy as np
 
 from feature.batch import batched
-from feature.skip import token_should_be_skipped
+SKIP_TOKENS = {"a", "an", "the", "of", ".", ",", ""}
+
+
+def token_should_be_skipped(token_id: int, tokenizer, special_token_ids: set[int]) -> bool:
+    if token_id in special_token_ids:
+        return True
+
+    token = tokenizer.decode([token_id]).strip().lower()
+    return token in SKIP_TOKENS
+
+
 
 
 def normalize_dataset(dataset: Iterable[Mapping[str, str]]) -> Iterator[str]:
