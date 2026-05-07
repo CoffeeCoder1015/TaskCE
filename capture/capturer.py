@@ -73,6 +73,16 @@ def latest_checkpoint(checkpoints):
     return sorted(checkpoints, key=checkpoint_sort_key)[-1]
 
 
+def verify_padded_batch_shape(tokenized, batch_input_ids):
+    actual_batch_size = tokenized["input_ids"].shape[0]
+    expected_batch_size = len(batch_input_ids)
+    if actual_batch_size != expected_batch_size:
+        raise ValueError(
+            "Padded tokenizer output changed the capture batch size: "
+            f"expected {expected_batch_size}, got {actual_batch_size}."
+        )
+
+
 def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, batch_size=32):
     model = AutoModelForCausalLM.from_pretrained(
         model_id,
@@ -133,6 +143,7 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
                 padding=True,
                 return_tensors="pt",
             )
+            verify_padded_batch_shape(tokenized, batch_input_ids)
 
             # With device_map="auto", putting inputs on the first parameter device is the
             # most direct way to let Accelerate dispatch the rest through model hooks.
