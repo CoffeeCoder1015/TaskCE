@@ -16,8 +16,6 @@ from feature.construct import construct_label_vocab_matrices, construct_vectors
 from capture import Capture, CaptureConfig
 from capture.postprocessing import prune_min_acts, threshold
 
-import ablation
-
 MODEL_ID = "LiquidAI/LFM2.5-1.2B-Thinking"
 LORA_DIR = "../multitune/output"
 RESULT_DIR = "results"
@@ -327,18 +325,6 @@ def main():
         activation_counts=fine_binary_acts.sum(dim=0),
     )
     beam_results_path = save_beam_results_dataframe(beam_df)
-
-    print("\nRunning ablation pipeline.")
-    ablation.run_ablation_pipeline(
-        result_csv=beam_results_path,
-        model_id=MODEL_ID,
-        lora_path=lora_path,
-        dataset=dataset,
-        data_formatter=format_snli_for_capture,
-        layer=-2,
-        output_dir=RESULT_DIR,
-    )
-
 
 if __name__ == "__main__":
     main()
