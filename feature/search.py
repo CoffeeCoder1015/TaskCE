@@ -65,6 +65,7 @@ def Search(neuron,feature_vectors):
     neuron = to_binary_tensor(neuron,device)
     scored_features = score_formulas(neuron,prepare_feature_vectors(feature_vectors,device),4096)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
+    nonzero_features.sort(key=lambda x: x[0],reverse=True)
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
     
     beam_size = 30
