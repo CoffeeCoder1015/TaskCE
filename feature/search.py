@@ -47,6 +47,10 @@ def prepare_feature_vectors(feature_vectors, device):
         for formula, binary_vector in feature_vectors
     ]
 
+def tensor_key(vector):
+    vector = vector.detach().to(device="cpu", dtype=torch.bool).contiguous()
+    return (tuple(vector.shape), vector.numpy().tobytes())
+
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
     return [
         (And(left=current_formula, right=feature_formula), current_vector & feature_vector),
@@ -69,35 +73,40 @@ def Search(neuron,feature_vectors):
     # Load queue
     queue_id = 0
     for item in nonzero_features:
-        if len(queue) >= beam_size:
-            break
         heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
         queue_id+=1
+    if len(queue) > beam_size:
+        queue = heapq.nsmallest(beam_size, queue)
+        heapq.heapify(queue)
     
+    best_iou = 0
+
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
     visited = set()
     while queue and expansions < max_expansions:
         iou, _, formula, vector = heapq.heappop(queue)
-        print(iou,formula)
+        iou = abs(iou)
+        if iou > best_iou:
+            best_iou = iou
+            print(iou,formula.flatten())
 
         # Check visit
-        vector_cpu = vector.cpu()
-        if vector_cpu in visited:
-            print("^ Visited")
+        key = tensor_key(vector)
+        if key in visited:
+            print("Already visited:",iou,formula.flatten())
             continue
-        visited.add(vector_cpu)
+        visited.add(key)
 
         neighbors = []
-        for neighbor_formula, neighbor_vector in nonzero_features:
+        for _, neighbor_formula, neighbor_vector in nonzero_features:
             for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
                 # Early skip
-                if n[1].cpu() in visited:
+                if tensor_key(n[1]) in visited:
                     continue
                 neighbors.append(n)
             
         scored_neighbors = score_formulas(neuron,neighbors,4096)
-        queue_id = 0
         for item in scored_neighbors:
             heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
             queue_id+=1
