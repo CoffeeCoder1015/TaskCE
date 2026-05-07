@@ -72,6 +72,7 @@ def Search(neuron,feature_vectors):
     queue = []
     # Load queue
     queue_id = 0
+    score_track = {}
     for item in nonzero_features:
         heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
         queue_id+=1
@@ -83,7 +84,6 @@ def Search(neuron,feature_vectors):
 
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
-    visited = set()
     while queue and expansions < max_expansions:
         iou, _, formula, vector = heapq.heappop(queue)
         iou = abs(iou)
@@ -91,23 +91,25 @@ def Search(neuron,feature_vectors):
             best_iou = iou
             print(iou,formula.flatten())
 
-        # Check visit
         key = tensor_key(vector)
-        if key in visited:
-            print("Already visited:",iou,formula.flatten())
+        prior_score = score_track.get(key)
+        if prior_score is not None and iou < prior_score:
+            print("Already visited with better score:",iou,formula.flatten())
             continue
-        visited.add(key)
+        score_track[key] = iou
 
         neighbors = []
         for _, neighbor_formula, neighbor_vector in nonzero_features:
             for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
-                # Early skip
-                if tensor_key(n[1]) in visited:
-                    continue
                 neighbors.append(n)
             
         scored_neighbors = score_formulas(neuron,neighbors,4096)
         for item in scored_neighbors:
+            key = tensor_key(item[2])
+            prior_score = score_track.get(key)
+            if prior_score is not None and item[0] < prior_score:
+                continue
+            score_track[key] = item[0]
             heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
             queue_id+=1
         
