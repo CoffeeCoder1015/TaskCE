@@ -3,6 +3,7 @@ import os
 
 from datasets import load_dataset
 import pandas as pd
+from feature.search import Search
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -203,128 +204,127 @@ def save_beam_results_dataframe(df, output_path=BEAM_RESULTS_CSV):
     return output_path
 
 
-def main():
-    os.makedirs(RESULT_DIR, exist_ok=True)
-    dataset = load_dataset("snli", split="validation", trust_remote_code=True)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    log_class_token_decodes(tokenizer)
+os.makedirs(RESULT_DIR, exist_ok=True)
+dataset = load_dataset("snli", split="validation", trust_remote_code=True)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+log_class_token_decodes(tokenizer)
 
-    formatted_dataset = dataset.map(
-        format_snli_text,
-        remove_columns=dataset.column_names,
-    )
-    token_counts = count_model_token_ids(
-        formatted_dataset,
-        tokenizer,
-        batch_size=512,
-    )
-    top_token_ids = top_token_counts(token_counts, tokenizer, top_k=4_000)
+formatted_dataset = dataset.map(
+    format_snli_text,
+    remove_columns=dataset.column_names,
+)
+token_counts = count_model_token_ids(
+    formatted_dataset,
+    tokenizer,
+    batch_size=512,
+)
+top_token_ids = top_token_counts(token_counts, tokenizer, top_k=4_000)
 
-    label_vocab_matrices = construct_label_vocab_matrices(
-        formatted_dataset,
-        tokenizer,
-        batch_size=512,
-    )
-    feature_vectors = construct_vectors(
-        label_vocab_matrices,
-        top_token_ids,
-        tokenizer,
-    )
+label_vocab_matrices = construct_label_vocab_matrices(
+    formatted_dataset,
+    tokenizer,
+    batch_size=512,
+)
+feature_vectors = construct_vectors(
+    label_vocab_matrices,
+    top_token_ids,
+    tokenizer,
+)
 
-    print(f"Rows: {len(formatted_dataset)}")
-    print(f"Fields: {formatted_dataset.column_names}")
-    print(f"Occurrence observations: {int(token_counts.sum())}")
-    print(f"Top token count: {len(top_token_ids)}")
-    print(f"Label vocab matrix shapes: { {k: v.shape for k, v in label_vocab_matrices.items()} }")
-    print(f"Final binary feature count: {len(feature_vectors)}")
-    print(f"Final binary feature vector length: {len(feature_vectors[0][1])}")
-    print(f"Final binary feature nonzeros: {sum(vector.sum() for _, vector in feature_vectors)}")
-    print("First 10 feature names:", [formula.flatten() for formula, _ in feature_vectors[:10]])
-    print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
+print(f"Rows: {len(formatted_dataset)}")
+print(f"Fields: {formatted_dataset.column_names}")
+print(f"Occurrence observations: {int(token_counts.sum())}")
+print(f"Top token count: {len(top_token_ids)}")
+print(f"Label vocab matrix shapes: { {k: v.shape for k, v in label_vocab_matrices.items()} }")
+print(f"Final binary feature count: {len(feature_vectors)}")
+print(f"Final binary feature vector length: {len(feature_vectors[0][1])}")
+print(f"Final binary feature nonzeros: {sum(vector.sum() for _, vector in feature_vectors)}")
+print("First 10 feature names:", [formula.flatten() for formula, _ in feature_vectors[:10]])
+print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
 
-    capture_results = Capture(
-        model_id=MODEL_ID,
-        lora_dir=LORA_DIR,  # Assumed to be used in conjunction with https://github.com/CoffeeCoder1015/multitune
-        tasks=[
-            CaptureConfig(
-                name="snli",
-                dataset=dataset,
-                data_formatter=format_snli_for_capture,
-            )
-        ],
-        layer=-2,
-        batch_size=256,
-    )
-
-    activations_base = capture_results["snli"]["base"]
-    activations_fine = capture_results["snli"]["finetuned"]
-    print(activations_base)
-    print(activations_fine)
-
-    alpha = 0.055
-    base_binary_acts = threshold(activations_base.states, alpha=alpha)
-    base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
-    fine_binary_acts = threshold(activations_fine.states, alpha=alpha)
-    fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
-
-    print(
-        "Base postprocessing:",
-        summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),
-    )
-    print(
-        "Finetuned postprocessing:",
-        summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
-    )
-
-    beam_size = 30
-    max_formula_length = 6
-    complexity_penalty = 1.00
-    score_batch_size = 4096
-    beamsearch_workers = 8
-    beam_results = beamsearch_all(
-        feature_vectors,
-        fine_pruned_acts,
-        beam_size=beam_size,
-        formula_length=max_formula_length,
-        complexity_penalty=complexity_penalty,
-        score_batch_size=score_batch_size,
-        num_workers=beamsearch_workers,
-    )
-
-    print("Beam search results:")
-    for result in beam_results:
-        original_neuron_id = int(fine_neuron_ids[result.activation_index])
-        best_formula, best_iou = result.best
-        best_noncomp_formula, best_noncomp_iou = result.best_noncomp
-
-        print(
-            f"Neuron {original_neuron_id}: "
-            f"best_iou={best_iou:.4f} "
-            f"best={best_formula}"
+capture_results = Capture(
+    model_id=MODEL_ID,
+    lora_dir=LORA_DIR,  # Assumed to be used in conjunction with https://github.com/CoffeeCoder1015/multitune
+    tasks=[
+        CaptureConfig(
+            name="snli",
+            dataset=dataset,
+            data_formatter=format_snli_for_capture,
         )
-        print(
-            f"  best_noncomp_iou={best_noncomp_iou:.4f} "
-            f"best_noncomp={best_noncomp_formula}"
-        )
+    ],
+    layer=-2,
+    batch_size=256,
+)
 
-    lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
-    lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
-    try:
-        classification_weights = get_classification_weights(lm_head_model)
-    finally:
-        del lm_head_model
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+activations_base = capture_results["snli"]["base"]
+activations_fine = capture_results["snli"]["finetuned"]
+print(activations_base)
+print(activations_fine)
 
-    beam_df = build_beam_results_dataframe(
-        beam_results,
-        fine_neuron_ids,
-        classification_weights,
-        total_neurons=fine_binary_acts.shape[1],
-        activation_counts=fine_binary_acts.sum(dim=0),
-    )
-    beam_results_path = save_beam_results_dataframe(beam_df)
+alpha = 0.055
+base_binary_acts = threshold(activations_base.states, alpha=alpha)
+base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
+fine_binary_acts = threshold(activations_fine.states, alpha=alpha)
+fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
 
-if __name__ == "__main__":
-    main()
+print(
+    "Base postprocessing:",
+    summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),
+)
+print(
+    "Finetuned postprocessing:",
+    summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
+)
+
+Search(fine_pruned_acts[0],feature_vectors)
+
+# beam_size = 30
+# max_formula_length = 6
+# complexity_penalty = 1.00
+# score_batch_size = 4096
+# beamsearch_workers = 8
+# beam_results = beamsearch_all(
+#     feature_vectors,
+#     fine_pruned_acts,
+#     beam_size=beam_size,
+#     formula_length=max_formula_length,
+#     complexity_penalty=complexity_penalty,
+#     score_batch_size=score_batch_size,
+#     num_workers=beamsearch_workers,
+# )
+
+
+# print("Beam search results:")
+# for result in beam_results:
+#     original_neuron_id = int(fine_neuron_ids[result.activation_index])
+#     best_formula, best_iou = result.best
+#     best_noncomp_formula, best_noncomp_iou = result.best_noncomp
+
+#     print(
+#         f"Neuron {original_neuron_id}: "
+#         f"best_iou={best_iou:.4f} "
+#         f"best={best_formula}"
+#     )
+#     print(
+#         f"  best_noncomp_iou={best_noncomp_iou:.4f} "
+#         f"best_noncomp={best_noncomp_formula}"
+#     )
+
+# lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
+# lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
+# try:
+#     classification_weights = get_classification_weights(lm_head_model)
+# finally:
+#     del lm_head_model
+#     gc.collect()
+#     if torch.cuda.is_available():
+#         torch.cuda.empty_cache()
+
+# beam_df = build_beam_results_dataframe(
+#     beam_results,
+#     fine_neuron_ids,
+#     classification_weights,
+#     total_neurons=fine_binary_acts.shape[1],
+#     activation_counts=fine_binary_acts.sum(dim=0),
+# )
+# beam_results_path = save_beam_results_dataframe(beam_df)
