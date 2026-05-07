@@ -1,5 +1,6 @@
 import gc
 import os
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -56,6 +57,20 @@ def resolve_capture_layer(model, layer):
         resolved_path, resolved_module = named_layers[layer_index]
 
     return resolved_module, resolved_path, layer_index
+
+
+def checkpoint_sort_key(path):
+    name = os.path.basename(path.rstrip(os.sep))
+    match = re.fullmatch(r"checkpoint-(\d+)", name)
+    if match:
+        return 1, int(match.group(1)), name
+    return 0, name
+
+
+def latest_checkpoint(checkpoints):
+    if not checkpoints:
+        return None
+    return sorted(checkpoints, key=checkpoint_sort_key)[-1]
 
 
 def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, batch_size=32):
@@ -205,9 +220,9 @@ def Capture(
         for task_name, task_path in task_paths.items()
     }
 
-    # Keep the eval convention: use the lexicographically latest checkpoint per task.
+    # Keep the eval convention: use the latest numbered checkpoint per task.
     latest_checkpoints = {
-        task_name: sorted(checkpoints)[-1]
+        task_name: latest_checkpoint(checkpoints)
         for task_name, checkpoints in task_and_checkpts.items()
         if checkpoints
     }
