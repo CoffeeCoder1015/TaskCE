@@ -96,33 +96,35 @@ def Search(neuron,feature_vectors):
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
     while queue and expansions < max_expansions:
-        rank_heuristic, _, formula, vector = heapq.heappop(queue)
-
-        current_iou = abs(rank_heuristic)
-        current_score = current_iou * length_penalty_factor(formula,penalty)
-        if current_score > best_score:
-            print("score:",current_score,formula.flatten())
-            best_score = current_score
-        if current_iou > best_iou:
-            print("iou:",current_iou,formula.flatten())
-            best_iou = current_iou
-
+        # rank_heuristic, _, formula, vector = heapq.heappop(queue)
 
         neighbors = []
-        for _, neighbor_formula, neighbor_vector in nonzero_features:
-            for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
-                neighbors.append(n)
+        for rank_heuristic, _, formula, vector in queue:
+            current_iou = abs(rank_heuristic)
+            current_score = current_iou * length_penalty_factor(formula,penalty)
+            if current_score > best_score:
+                print("score:",current_score,formula.flatten())
+                best_score = current_score
+            if current_iou > best_iou:
+                print("iou:",current_iou,formula.flatten())
+                best_iou = current_iou
+
+            for _, neighbor_formula, neighbor_vector in nonzero_features:
+                for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
+                    neighbors.append(n)
             
+        new_queue = []
         scored_neighbors = formula_iou(neuron,neighbors,4096)
         for item in scored_neighbors:
             key = tensor_key(item[2])
             prior_score = score_track.get(key,0)
-            score = abs(item[0]) * length_penalty_factor(formula,penalty)
+            score = abs(item[0]) * length_penalty_factor(item[1],penalty)
             if score  > prior_score:
                 score_track[key] = score
-                heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+                heapq.heappush(new_queue,(-item[0],queue_id,item[1],item[2]))
                 queue_id+=1
         
+        queue = new_queue
         if len(queue) > beam_size:
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
