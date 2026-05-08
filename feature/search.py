@@ -9,7 +9,7 @@ def batched_iou(neuron,binary_vecs):
     raw_scores = intersections.float() / unions.clamp_min(1).float()
     return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
 
-def score_formulas(neuron,formulas_vectors,batch_size):
+def formula_iou(neuron,formulas_vectors,batch_size):
     candidates = []
     for i in range(0, len(formulas_vectors), batch_size):
         batch = formulas_vectors[i:i+batch_size]
@@ -17,16 +17,7 @@ def score_formulas(neuron,formulas_vectors,batch_size):
         binary_vectors =[bin_vec for _, bin_vec in batch] 
         vectors = torch.stack(binary_vectors)
         iou = batched_iou(neuron,vectors)
-        length_penalties = torch.tensor(
-            [
-                0.99 ** (len(formula) - 1)
-                for formula in formulas
-            ],
-            dtype=iou.dtype,
-            device=iou.device,
-        )
-        scores = (iou * length_penalties).tolist()
-        candidates.extend(zip(scores,formulas,binary_vectors))
+        candidates.extend(zip(iou.tolist(),formulas,binary_vectors))
     return candidates
 
 def resolve_device(device=None):
@@ -47,9 +38,10 @@ def prepare_feature_vectors(feature_vectors, device):
         for formula, binary_vector in feature_vectors
     ]
 
+# Hash keys to not visit them again
 def tensor_key(vector):
     vector = vector.detach().to(device="cpu", dtype=torch.bool).contiguous()
-    return (tuple(vector.shape), vector.numpy().tobytes())
+    return vector.numpy().tobytes()
 
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
     return [
@@ -63,7 +55,7 @@ def Search(neuron,feature_vectors):
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
     neuron = to_binary_tensor(neuron,device)
-    scored_features = score_formulas(neuron,prepare_feature_vectors(feature_vectors,device),4096)
+    scored_features = formula_iou(neuron,prepare_feature_vectors(feature_vectors,device),4096)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
     nonzero_features.sort(key=lambda x: x[0],reverse=True)
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
@@ -76,43 +68,39 @@ def Search(neuron,feature_vectors):
     score_track = {}
     for item in nonzero_features:
         heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+        score_track[tensor_key(item[2])] = item[0]
         queue_id+=1
     if len(queue) > beam_size:
         queue = heapq.nsmallest(beam_size, queue)
         heapq.heapify(queue)
     
-    best_iou = 0
-
+    best_score = 0
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
+    penalty = 0.99
     while queue and expansions < max_expansions:
-        iou, _, formula, vector = heapq.heappop(queue)
-        iou = abs(iou)
-        if iou > best_iou:
-            best_iou = iou
-            print(iou,formula.flatten())
+        rank_heuristic, _, formula, vector = heapq.heappop(queue)
 
-        key = tensor_key(vector)
-        prior_score = score_track.get(key)
-        if prior_score is not None and iou < prior_score:
-            print("Already visited with better score:",iou,formula.flatten())
-            continue
-        score_track[key] = iou
+        current_iou = abs(rank_heuristic)
+        current_score = current_iou * penalty ** ( len(formula) - 1 )
+        if current_score > best_score:
+            print(current_iou,formula.flatten())
+            best_score = current_score
 
         neighbors = []
         for _, neighbor_formula, neighbor_vector in nonzero_features:
             for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
                 neighbors.append(n)
             
-        scored_neighbors = score_formulas(neuron,neighbors,4096)
+        scored_neighbors = formula_iou(neuron,neighbors,4096)
         for item in scored_neighbors:
             key = tensor_key(item[2])
-            prior_score = score_track.get(key)
-            if prior_score is not None and item[0] < prior_score:
-                continue
-            score_track[key] = item[0]
-            heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
-            queue_id+=1
+            prior_score = score_track.get(key,0)
+            score = abs(item[0])*penalty**(len(item[1]) - 1)
+            if score  > prior_score:
+                score_track[key] = score
+                heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+                queue_id+=1
         
         if len(queue) > beam_size:
             queue = heapq.nsmallest(beam_size, queue)
