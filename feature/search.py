@@ -38,9 +38,6 @@ def prepare_feature_vectors(feature_vectors, device):
         for formula, binary_vector in feature_vectors
     ]
 
-def length_penalty_factor(formula, penalty):
-    return max(0.0, 1.0 - penalty * (len(formula) - 1))
-
 # Hash keys to not visit them again
 def tensor_key(vector):
     vector = vector.detach().to(device="cpu", dtype=torch.bool).contiguous()
@@ -81,12 +78,11 @@ def Search(neuron,feature_vectors):
     best_iou = 0
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
-    penalty = 0.01
     while queue and expansions < max_expansions:
         rank_heuristic, _, formula, vector = heapq.heappop(queue)
 
         current_iou = abs(rank_heuristic)
-        current_score = current_iou* length_penalty_factor(formula, penalty)          
+        current_score = current_iou / len(formula)
         if current_score > best_score:
             print("score:",current_score,formula.flatten())
             best_score = current_score
@@ -104,7 +100,7 @@ def Search(neuron,feature_vectors):
         for item in scored_neighbors:
             key = tensor_key(item[2])
             prior_score = score_track.get(key,0)
-            score = abs(item[0]) * length_penalty_factor(item[1], penalty)
+            score = abs(item[0]) / len(item[1])
             if score  > prior_score:
                 score_track[key] = score
                 heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
