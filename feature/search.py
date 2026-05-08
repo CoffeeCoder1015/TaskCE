@@ -43,6 +43,9 @@ def tensor_key(vector):
     vector = vector.detach().to(device="cpu", dtype=torch.bool).contiguous()
     return vector.numpy().tobytes()
 
+def length_penalty_factor(formula, penalty):
+    return max(0.0, 1.0 - penalty * (len(formula) - 1))
+
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
     new_compositions = []
 
@@ -78,6 +81,7 @@ def Search(neuron,feature_vectors):
     queue = []
     # Load queue
     queue_id = 0
+    penalty = 0.01
     score_track = {}
     for item in nonzero_features:
         heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
@@ -95,7 +99,7 @@ def Search(neuron,feature_vectors):
         rank_heuristic, _, formula, vector = heapq.heappop(queue)
 
         current_iou = abs(rank_heuristic)
-        current_score = current_iou / len(formula)
+        current_score = current_iou * length_penalty_factor(formula,penalty)
         if current_score > best_score:
             print("score:",current_score,formula.flatten())
             best_score = current_score
@@ -113,7 +117,7 @@ def Search(neuron,feature_vectors):
         for item in scored_neighbors:
             key = tensor_key(item[2])
             prior_score = score_track.get(key,0)
-            score = abs(item[0]) / len(item[1])
+            score = abs(item[0]) * length_penalty_factor(formula,penalty)
             if score  > prior_score:
                 score_track[key] = score
                 heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
