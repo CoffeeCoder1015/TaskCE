@@ -44,11 +44,24 @@ def tensor_key(vector):
     return vector.numpy().tobytes()
 
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
-    return [
-        (And(left=current_formula, right=feature_formula), current_vector & feature_vector),
-        (Or(left=current_formula, right=feature_formula), current_vector | feature_vector),
-        (And(left=current_formula, right=Not(feature_formula)), current_vector & ~feature_vector),
-    ]
+    new_compositions = []
+
+    if torch.any(current_vector & ~feature_vector).item():
+        new_compositions.append(
+            (And(left=current_formula, right=feature_formula), current_vector & feature_vector)
+        )
+    if torch.any(feature_vector & ~current_vector).item():
+        new_compositions.append(
+            (Or(left=current_formula, right=feature_formula), current_vector | feature_vector)
+        )
+    if (
+        current_formula != feature_formula
+        and torch.any(current_vector & feature_vector).item()
+    ):
+        new_compositions.append(
+            (And(left=current_formula, right=Not(feature_formula)), current_vector & ~feature_vector)
+        )
+    return new_compositions
 
 def Search(neuron,feature_vectors):
     device = resolve_device()
