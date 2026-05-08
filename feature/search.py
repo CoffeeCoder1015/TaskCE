@@ -66,7 +66,7 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
         )
     return new_compositions
 
-def Search(neuron,feature_vectors):
+def LevelSearch(neuron,feature_vectors):
     device = resolve_device()
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
@@ -114,7 +114,7 @@ def Search(neuron,feature_vectors):
                     neighbors.append(n)
             
         new_queue = []
-        scored_neighbors = formula_iou(neuron,neighbors,4096)
+        scored_neighbors = formula_iou(neuron,neighbors,16384)
         for item in scored_neighbors:
             key = tensor_key(item[2])
             prior_score = score_track.get(key,0)
@@ -129,7 +129,67 @@ def Search(neuron,feature_vectors):
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
 
+def Search(neuron,feature_vectors):
+    device = resolve_device()
+    print("Neuron shape:",neuron.shape)
+    print("Feature shape:",feature_vectors[0][1].shape)
+    neuron = to_binary_tensor(neuron,device)
+    scored_features = formula_iou(neuron,prepare_feature_vectors(feature_vectors,device),4096)
+    nonzero_features = [feature for feature in scored_features if feature[0] > 0]
+    nonzero_features.sort(key=lambda x: x[0],reverse=True)
+    print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
+    
+    beam_size = 30
+    formula_length = 6
+    queue = []
+    # Load queue
+    queue_id = 0
+    penalty = 0.01
+    score_track = {}
+    for item in nonzero_features:
+        heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+        score_track[tensor_key(item[2])] = item[0]
+        queue_id+=1
+    if len(queue) > beam_size:
+        queue = heapq.nsmallest(beam_size, queue)
+        heapq.heapify(queue)
+    
+    best_score = 0
+    best_iou = 0
+    max_expansions = beam_size * max(0, formula_length - 1)
+    expansions = 0
+    while queue and expansions < max_expansions:
+        rank_heuristic, _, formula, vector = heapq.heappop(queue)
+
+        current_iou = abs(rank_heuristic)
+        current_score = current_iou * length_penalty_factor(formula,penalty)
+        if current_score > best_score:
+            print("score:",current_score,formula.flatten())
+            best_score = current_score
+        if current_iou > best_iou:
+            print("iou:",current_iou,formula.flatten())
+            best_iou = current_iou
+
+        neighbors = []
+        for _, neighbor_formula, neighbor_vector in nonzero_features:
+            for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
+                neighbors.append(n)
+            
+        scored_neighbors = formula_iou(neuron,neighbors,16384)
+        for item in scored_neighbors:
+            key = tensor_key(item[2])
+            prior_score = score_track.get(key,0)
+            score = abs(item[0]) * length_penalty_factor(item[1],penalty)
+            if score  > prior_score:
+                score_track[key] = score
+                heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+                queue_id+=1
+        
+        if len(queue) > beam_size:
+            queue = heapq.nsmallest(beam_size, queue)
+            heapq.heapify(queue)
+
 def search_worker(neurons,feature_vectors):
     shape = neurons.shape
     for i in range(shape[1]):
-        Search(neurons[:,i],feature_vectors)
+        LevelSearch(neurons[:,i],feature_vectors)
