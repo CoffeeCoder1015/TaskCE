@@ -78,6 +78,7 @@ def Search(neuron,feature_vectors):
         heapq.heapify(queue)
     
     best_score = 0
+    best_iou = 0
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
     penalty = 0.01
@@ -85,10 +86,14 @@ def Search(neuron,feature_vectors):
         rank_heuristic, _, formula, vector = heapq.heappop(queue)
 
         current_iou = abs(rank_heuristic)
-        current_score = current_iou * length_penalty_factor(formula, penalty)
+        current_score = current_iou* length_penalty_factor(formula, penalty)          
         if current_score > best_score:
-            print(current_iou,formula.flatten())
+            print("score:",current_score,formula.flatten())
             best_score = current_score
+        if current_iou > best_iou:
+            print("iou:",current_iou,formula.flatten())
+            best_iou = current_iou
+
 
         neighbors = []
         for _, neighbor_formula, neighbor_vector in nonzero_features:
