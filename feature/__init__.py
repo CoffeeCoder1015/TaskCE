@@ -6,7 +6,7 @@ from feature.find import (
     token_should_be_skipped,
     top_token_counts,
 )
-from feature.formula import And, Constant, Leaf, Not, Or
+from feature.formula import And, Leaf, Not, Or
 
 __all__ = [
     "And",
