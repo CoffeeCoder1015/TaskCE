@@ -69,7 +69,7 @@ class Constant(Node):
         return "TRUE" if self.value else "FALSE"
 
     def __len__(self):
-        return 0
+        return 1
 
     def simplify_tree(self):
         return self, {}
