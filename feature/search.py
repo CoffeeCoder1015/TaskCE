@@ -175,6 +175,7 @@ def Search(neuron,feature_vectors):
     expansions = 0
     while queue and expansions < max_expansions:
         rank_heuristic, _, formula, vector = heapq.heappop(queue)
+        formula = simplify_logic(formula)
 
         current_iou = abs(rank_heuristic)
         current_score = current_iou * length_penalty_factor(formula,penalty)
@@ -192,7 +193,7 @@ def Search(neuron,feature_vectors):
             
         scored_neighbors = formula_iou(neuron,neighbors,16384)
         for item in scored_neighbors:
-            formula = simplify_logic(item[1])
+            formula = item[1]
             key = formula
             prior_score = score_track.get(key,0)
             score = abs(item[0]) * length_penalty_factor(formula,penalty)
