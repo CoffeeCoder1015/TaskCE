@@ -58,23 +58,37 @@ def assert_explanation_formula(formula):
 def length_penalty_factor(formula, penalty):
     return max(0.0, 1.0 - penalty * (len(formula) - 1))
 
+def simplify_composition(formula, vector):
+    simplified_formula = simplified_formula_key(formula)
+    assert_explanation_formula(simplified_formula)
+    return simplified_formula, vector
+
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
     new_compositions = []
 
     if torch.any(current_vector & ~feature_vector).item():
         new_compositions.append(
-            (And(left=current_formula, right=feature_formula), current_vector & feature_vector)
+            simplify_composition(
+                And(left=current_formula, right=feature_formula),
+                current_vector & feature_vector,
+            )
         )
     if torch.any(feature_vector & ~current_vector).item():
         new_compositions.append(
-            (Or(left=current_formula, right=feature_formula), current_vector | feature_vector)
+            simplify_composition(
+                Or(left=current_formula, right=feature_formula),
+                current_vector | feature_vector,
+            )
         )
     if (
         current_formula != feature_formula
         and torch.any(current_vector & feature_vector).item()
     ):
         new_compositions.append(
-            (And(left=current_formula, right=Not(feature_formula)), current_vector & ~feature_vector)
+            simplify_composition(
+                And(left=current_formula, right=Not(feature_formula)),
+                current_vector & ~feature_vector,
+            )
         )
     return new_compositions
 
@@ -191,14 +205,13 @@ def Search(neuron,feature_vectors):
             
         scored_neighbors = formula_iou(neuron,neighbors,16384)
         for item in scored_neighbors:
-            simplified_formula = simplified_formula_key(item[1])
-            assert_explanation_formula(simplified_formula)
-            key = simplified_formula
+            formula = item[1]
+            key = formula
             prior_score = score_track.get(key,0)
-            score = abs(item[0]) * length_penalty_factor(simplified_formula,penalty)
+            score = abs(item[0]) * length_penalty_factor(formula,penalty)
             if score  > prior_score:
                 score_track[key] = score
-                heapq.heappush(queue,(-item[0],queue_id,simplified_formula,item[2]))
+                heapq.heappush(queue,(-item[0],queue_id,formula,item[2]))
                 queue_id+=1
         
         if len(queue) > beam_size:
