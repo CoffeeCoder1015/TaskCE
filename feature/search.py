@@ -1,5 +1,7 @@
 import heapq
 
+from sympy import Symbol
+
 import torch
 # from feature.formula import And, Not, Or 
 from sympy.logic import And, Or, Not
@@ -45,7 +47,8 @@ def tensor_key(vector):
     return vector.numpy().tobytes()
 
 def length_penalty_factor(formula, penalty):
-    return max(0.0, 1.0 - penalty * (len(formula) - 1))
+    length = formula.count(Symbol)
+    return max(0.0, 1.0 - penalty * (length - 1))
 
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
     new_compositions = []
