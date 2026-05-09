@@ -3,6 +3,7 @@ from feature.search import (
     assert_explanation_formula,
     is_explanation_formula,
     length_penalty_factor,
+    simplify_composition,
     simplified_formula_key,
 )
 
@@ -23,6 +24,16 @@ def test_simplified_formula_key_uses_simplified_tree_hash():
 
     assert simplified_formula_key(And(left=leaf, right=leaf)) == leaf
     assert hash(simplified_formula_key(And(left=leaf, right=leaf))) == hash(leaf)
+
+
+def test_simplify_composition_returns_simplified_formula_with_original_vector():
+    leaf = Leaf(label="tok", token_id=1, token="A")
+    vector = object()
+
+    formula, returned_vector = simplify_composition(And(left=leaf, right=leaf), vector)
+
+    assert formula == leaf
+    assert returned_vector is vector
 
 
 def test_constants_are_not_top_level_explanations():
