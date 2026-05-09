@@ -1,7 +1,8 @@
 import heapq
 
 import torch
-from feature.formula import And, Constant, Not, Or, simplify_tree
+# from feature.formula import And, Not, Or 
+from sympy.logic import And, Or, Not
 
 def batched_iou(neuron,binary_vecs):
     intersections = (binary_vecs & neuron).sum(dim=1)
@@ -43,14 +44,6 @@ def tensor_key(vector):
     vector = vector.detach().to(device="cpu", dtype=torch.bool).contiguous()
     return vector.numpy().tobytes()
 
-def is_explanation_formula(formula):
-    return not isinstance(formula, Constant)
-
-def assert_explanation_formula(formula):
-    assert is_explanation_formula(formula), (
-        f"Top-level explanation simplified to constant {formula.flatten()}"
-    )
-
 def length_penalty_factor(formula, penalty):
     return max(0.0, 1.0 - penalty * (len(formula) - 1))
 
@@ -60,14 +53,14 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
     if torch.any(current_vector & ~feature_vector).item():
         new_compositions.append(
             (
-                And(left=current_formula, right=feature_formula),
+                And(current_formula, feature_formula),
                 current_vector & feature_vector,
             )
         )
     if torch.any(feature_vector & ~current_vector).item():
         new_compositions.append(
             (
-                Or(left=current_formula, right=feature_formula),
+                Or(current_formula, feature_formula),
                 current_vector | feature_vector,
             )
         )
@@ -77,7 +70,7 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
     ):
         new_compositions.append(
             (
-                And(left=current_formula, right=Not(feature_formula)),
+                And(current_formula, Not(feature_formula)),
                 current_vector & ~feature_vector,
             )
         )
@@ -164,10 +157,9 @@ def Search(neuron,feature_vectors):
     penalty = 0.01
     score_track = {}
     for item in nonzero_features:
-        simplified_formula = simplify_tree(item[1])
-        assert_explanation_formula(simplified_formula)
-        heapq.heappush(queue,(-item[0],queue_id,simplified_formula,item[2]))
-        score_track[simplified_formula] = item[0]
+        formula = item[1]
+        heapq.heappush(queue,(-item[0],queue_id,formula,item[2]))
+        score_track[formula] = item[0]
         queue_id+=1
     if len(queue) > beam_size:
         queue = heapq.nsmallest(beam_size, queue)
@@ -192,7 +184,6 @@ def Search(neuron,feature_vectors):
         neighbors = []
         for _, neighbor_formula, neighbor_vector in nonzero_features:
             for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
-                n = (simplify_tree(n[0]),n[1])
                 neighbors.append(n)
             
         scored_neighbors = formula_iou(neuron,neighbors,16384)
