@@ -1,7 +1,6 @@
 import heapq
 
-from matplotlib.pylab import logistic
-from sympy import Symbol
+from sympy import Symbol, simplify_logic
 
 import torch
 # from feature.formula import And, Not, Or 
@@ -193,7 +192,7 @@ def Search(neuron,feature_vectors):
             
         scored_neighbors = formula_iou(neuron,neighbors,16384)
         for item in scored_neighbors:
-            formula = item[1]
+            formula = simplify_logic(item[1])
             key = formula
             prior_score = score_track.get(key,0)
             score = abs(item[0]) * length_penalty_factor(formula,penalty)
