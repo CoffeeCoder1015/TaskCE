@@ -1,9 +1,11 @@
 import heapq
 
+from matplotlib.pylab import logistic
 from sympy import Symbol
 
 import torch
 # from feature.formula import And, Not, Or 
+from feature.formula import logic_str
 from sympy.logic import And, Or, Not
 
 def batched_iou(neuron,binary_vecs):
@@ -116,10 +118,10 @@ def LevelSearch(neuron,feature_vectors):
             current_iou = abs(rank_heuristic)
             current_score = current_iou * length_penalty_factor(formula,penalty)
             if current_score > best_score:
-                print("score:",current_score,formula)
+                print("score:",current_score,logic_str(formula))
                 best_score = current_score
             if current_iou > best_iou:
-                print("iou:",current_iou,formula)
+                print("iou:",current_iou,logic_str(formula))
                 best_iou = current_iou
 
             for _, neighbor_formula, neighbor_vector in nonzero_features:
@@ -178,10 +180,10 @@ def Search(neuron,feature_vectors):
         current_iou = abs(rank_heuristic)
         current_score = current_iou * length_penalty_factor(formula,penalty)
         if current_score > best_score:
-            print("score:",current_score,formula)
+            print("score:",current_score,logic_str(formula))
             best_score = current_score
         if current_iou > best_iou:
-            print("iou:",current_iou,formula)
+            print("iou:",current_iou,logic_str(formula))
             best_iou = current_iou
 
         neighbors = []
