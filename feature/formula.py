@@ -1,6 +1,25 @@
 from __future__ import annotations
 
 from attr import dataclass
+from sympy import  Symbol
+from sympy.logic.boolalg import And, Or, Not
+
+def logic_str(expr):
+    if isinstance(expr, Symbol):
+        return f"{expr}"
+
+    if expr.func is Not:
+        return f"(NOT {logic_str(expr.args[0])})"
+
+    if expr.func is And:
+        inner = " AND ".join(f"{logic_str(arg)}" for arg in expr.args)
+        return f"({inner})"
+
+    if expr.func is Or:
+        inner = " OR ".join(f"{logic_str(arg)}" for arg in expr.args)
+        return f"({inner})"
+
+    return f"{expr}"
 
 
 # For clarity sake: every formula element is a Node with recursive flattening.
