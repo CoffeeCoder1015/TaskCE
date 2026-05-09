@@ -1,7 +1,7 @@
 import heapq
 
 import torch
-from feature.formula import And, Not, Or
+from feature.formula import And, Constant, Not, Or
 
 def batched_iou(neuron,binary_vecs):
     intersections = (binary_vecs & neuron).sum(dim=1)
@@ -42,6 +42,18 @@ def prepare_feature_vectors(feature_vectors, device):
 def tensor_key(vector):
     vector = vector.detach().to(device="cpu", dtype=torch.bool).contiguous()
     return vector.numpy().tobytes()
+
+def simplified_formula_key(formula):
+    simplified_formula, _ = formula.simplify_tree()
+    return simplified_formula
+
+def is_explanation_formula(formula):
+    return not isinstance(formula, Constant)
+
+def assert_explanation_formula(formula):
+    assert is_explanation_formula(formula), (
+        f"Top-level explanation simplified to constant {formula.flatten()}"
+    )
 
 def length_penalty_factor(formula, penalty):
     return max(0.0, 1.0 - penalty * (len(formula) - 1))
@@ -147,8 +159,10 @@ def Search(neuron,feature_vectors):
     penalty = 0.01
     score_track = {}
     for item in nonzero_features:
-        heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
-        score_track[tensor_key(item[2])] = item[0]
+        simplified_formula = simplified_formula_key(item[1])
+        assert_explanation_formula(simplified_formula)
+        heapq.heappush(queue,(-item[0],queue_id,simplified_formula,item[2]))
+        score_track[simplified_formula] = item[0]
         queue_id+=1
     if len(queue) > beam_size:
         queue = heapq.nsmallest(beam_size, queue)
@@ -177,12 +191,14 @@ def Search(neuron,feature_vectors):
             
         scored_neighbors = formula_iou(neuron,neighbors,16384)
         for item in scored_neighbors:
-            key = tensor_key(item[2])
+            simplified_formula = simplified_formula_key(item[1])
+            assert_explanation_formula(simplified_formula)
+            key = simplified_formula
             prior_score = score_track.get(key,0)
-            score = abs(item[0]) * length_penalty_factor(item[1],penalty)
+            score = abs(item[0]) * length_penalty_factor(simplified_formula,penalty)
             if score  > prior_score:
                 score_track[key] = score
-                heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
+                heapq.heappush(queue,(-item[0],queue_id,simplified_formula,item[2]))
                 queue_id+=1
         
         if len(queue) > beam_size:
