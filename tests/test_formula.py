@@ -1,5 +1,6 @@
 from feature.formula import And, Constant, Leaf, Not, Or, to_tree_structure
 from sympy import Symbol
+from sympy.logic.boolalg import And as SympyAnd
 
 
 def test_to_tree_structure_restores_leaf_from_metadata():
@@ -25,6 +26,16 @@ def test_simplify_tree_collapses_duplicate_and():
     tree, _ = And(left=leaf, right=leaf).simplify_tree()
 
     assert tree == leaf
+
+
+def test_flatten_sympy_does_not_simplify_intermediate_expression():
+    leaf = Leaf(label="tok", token_id=1, token="A")
+
+    expression, metadata = And(left=leaf, right=leaf).flatten_sympy()
+
+    assert expression.func is SympyAnd
+    assert expression.args == (Symbol("tok:A"), Symbol("tok:A"))
+    assert metadata == {"tok:A": ["tok", 1, "A"]}
 
 
 def test_simplify_tree_converts_unary_and_binary_sympy_nodes():
