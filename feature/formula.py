@@ -1,6 +1,49 @@
 from __future__ import annotations
 
 from attr import dataclass
+from sympy import false, Symbol, simplify, true
+from sympy.logic.boolalg import And as SympyAnd
+from sympy.logic.boolalg import BooleanFalse, BooleanTrue
+from sympy.logic.boolalg import Not as SympyNot
+from sympy.logic.boolalg import Or as SympyOr
+
+
+def to_tree_structure(sympy_expression,metadat):
+    # Turn the sympy expression back into the custom tree
+    if isinstance(sympy_expression, Symbol):
+        symbol = str(sympy_expression)
+        try:
+            label, token_id, token = metadat[symbol]
+        except KeyError as error:
+            raise ValueError(f"Missing metadata for symbol {symbol!r}") from error
+        return Leaf(label=label, token_id=token_id, token=token)
+
+    if sympy_expression is True or isinstance(sympy_expression, BooleanTrue):
+        return Constant(value=True)
+    if sympy_expression is False or isinstance(sympy_expression, BooleanFalse):
+        return Constant(value=False)
+
+    if sympy_expression.func is SympyNot:
+        return Not(child=to_tree_structure(sympy_expression.args[0], metadat))
+
+    if sympy_expression.func in (SympyAnd, SympyOr):
+        node_type = And if sympy_expression.func is SympyAnd else Or
+        children = [
+            to_tree_structure(child, metadat)
+            for child in sympy_expression.args
+        ]
+        if not children:
+            return Constant(value=sympy_expression.func is SympyAnd)
+
+        tree = children[0]
+        for child in children[1:]:
+            tree = node_type(left=tree, right=child)
+        return tree
+
+    raise TypeError(
+        f"Unsupported SymPy expression {sympy_expression!r} "
+        f"of type {type(sympy_expression).__name__}"
+    )
 
 
 # For clarity sake: every formula element is a Node with recursive flattening.
@@ -10,6 +53,29 @@ class Node:
 
     def __len__(self):
         raise NotImplementedError
+    
+    def simplify_tree(self):
+        raise NotImplementedError
+
+    def _simplify_expression(self):
+        raise NotImplementedError
+
+
+@dataclass(frozen=True)
+class Constant(Node):
+    value: bool
+
+    def flatten(self):
+        return "TRUE" if self.value else "FALSE"
+
+    def __len__(self):
+        return 0
+
+    def simplify_tree(self):
+        return self, {}
+
+    def _simplify_expression(self):
+        return (true if self.value else false), {}
 
 
 @dataclass(frozen=True)
@@ -23,6 +89,16 @@ class Leaf(Node):
 
     def __len__(self):
         return 1
+    
+    def simplify_tree(self):
+        formula, metadata = self._simplify_expression()
+        return to_tree_structure(formula, metadata), metadata
+
+    def _simplify_expression(self):
+        str_rep = f"{self.label}:{self.token}"
+        metadata = {str_rep:[self.label,self.token_id,self.token]}
+        return ( Symbol(str_rep),metadata )
+
 
 
 @dataclass(frozen=True)
@@ -34,6 +110,14 @@ class Not(Node):
 
     def __len__(self):
         return 1 + len(self.child)
+    
+    def simplify_tree(self):
+        formula, metadata = self._simplify_expression()
+        return to_tree_structure(formula, metadata), metadata
+
+    def _simplify_expression(self):
+        formula, metadata = self.child._simplify_expression()
+        return ( simplify(~(formula)),metadata )
 
 
 @dataclass(frozen=True)
@@ -46,6 +130,15 @@ class And(Node):
 
     def __len__(self):
         return len(self.left) + len(self.right)
+    
+    def simplify_tree(self):
+        formula, metadata = self._simplify_expression()
+        return to_tree_structure(formula, metadata), metadata
+
+    def _simplify_expression(self):
+        leftformula,leftmetadata = self.left._simplify_expression()
+        rightformula,rightmetadata = self.right._simplify_expression()
+        return ( simplify(leftformula & rightformula), leftmetadata | rightmetadata )
 
 
 @dataclass(frozen=True)
@@ -58,3 +151,12 @@ class Or(Node):
 
     def __len__(self):
         return len(self.left) + len(self.right)
+
+    def simplify_tree(self):
+        formula, metadata = self._simplify_expression()
+        return to_tree_structure(formula, metadata), metadata
+
+    def _simplify_expression(self):
+        leftformula,leftmetadata = self.left._simplify_expression()
+        rightformula,rightmetadata = self.right._simplify_expression()
+        return ( simplify(leftformula | rightformula), leftmetadata | rightmetadata )
