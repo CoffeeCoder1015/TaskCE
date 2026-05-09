@@ -3,7 +3,7 @@ import os
 
 from datasets import load_dataset
 import pandas as pd
-from feature.search import LevelSearch
+from feature.search import LevelSearch, Search
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -276,7 +276,8 @@ print(
     summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
 )
 
-LevelSearch(fine_pruned_acts[:,0],feature_vectors)
+# LevelSearch(fine_pruned_acts[:,0],feature_vectors)
+Search(fine_pruned_acts[:,0],feature_vectors)
 
 # beam_size = 30
 # max_formula_length = 6
