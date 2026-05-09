@@ -3,6 +3,7 @@ from scipy.sparse import csr_matrix, hstack
 
 from feature.batch import batched
 from feature.formula import Leaf
+from sympy import Symbol
 
 
 def construct_label_vocab_matrices(dataset, tokenizer, formatter=None, batch_size=256):
@@ -64,7 +65,7 @@ def construct_vectors(label_vocab_matrices, features, tokenizer):
             decoded_token = tokenizer.decode([token_id])
             feature_vectors.append(
                 (
-                    Leaf(label=label, token_id=token_id, token=decoded_token),
+                    Symbol(f"{label}:{decoded_token}"),
                     dense_feature_matrix[:, feature_index],
                 )
             )
