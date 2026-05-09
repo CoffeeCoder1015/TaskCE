@@ -113,10 +113,10 @@ def LevelSearch(neuron,feature_vectors):
             current_iou = abs(rank_heuristic)
             current_score = current_iou * length_penalty_factor(formula,penalty)
             if current_score > best_score:
-                print("score:",current_score,formula.flatten())
+                print("score:",current_score,formula)
                 best_score = current_score
             if current_iou > best_iou:
-                print("iou:",current_iou,formula.flatten())
+                print("iou:",current_iou,formula)
                 best_iou = current_iou
 
             for _, neighbor_formula, neighbor_vector in nonzero_features:
@@ -175,10 +175,10 @@ def Search(neuron,feature_vectors):
         current_iou = abs(rank_heuristic)
         current_score = current_iou * length_penalty_factor(formula,penalty)
         if current_score > best_score:
-            print("score:",current_score,formula.flatten())
+            print("score:",current_score,formula)
             best_score = current_score
         if current_iou > best_iou:
-            print("iou:",current_iou,formula.flatten())
+            print("iou:",current_iou,formula)
             best_iou = current_iou
 
         neighbors = []
