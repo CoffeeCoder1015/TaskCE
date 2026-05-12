@@ -16,6 +16,14 @@ class SearchState:
     formula: sympy.Expr
     vector: torch.Tensor
 
+
+@dataclass(frozen=True)
+class SearchResult:
+    activation_index: int
+    best_formula: str
+    best_score: float
+
+
 # Helper functions for compute
 def resolve_device(device=None):
     if device is not None:
@@ -118,6 +126,7 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
         queue = heapq.nsmallest(beam_size, queue)
         heapq.heapify(queue)
     
+    best_formula = ""
     best_score = 0
     best_iou = 0
 
@@ -131,6 +140,7 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
             current_score = current_iou * length_penalty_factor(formula, penalty)
             if current_score > best_score:
                 print("score:", current_score, logic_str(formula))
+                best_formula = logic_str(formula)
                 best_score = current_score
             if current_iou > best_iou:
                 print("iou:", current_iou, logic_str(formula))
@@ -163,6 +173,8 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
             heapq.heapify(queue)
         iterations += 1
 
+    return best_formula, best_score
+
 def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
     print("Neuron shape:",neuron_activation.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
@@ -189,6 +201,7 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
         queue = heapq.nsmallest(beam_size, queue)
         heapq.heapify(queue)
     
+    best_formula = ""
     best_score = 0
     best_iou = 0
 
@@ -202,6 +215,7 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
         current_score = current_iou * length_penalty_factor(formula, penalty)
         if current_score > best_score:
             print("score:", current_score, logic_str(formula))
+            best_formula = logic_str(formula)
             best_score = current_score
         if current_iou > best_iou:
             print("iou:", current_iou, logic_str(formula))
@@ -234,6 +248,8 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
 
         iterations+=1
 
+    return best_formula, best_score
+
 def to_numpy_bool(value):
     if isinstance(value, torch.Tensor):
         return value.detach().cpu().numpy().astype(np.bool_, copy=False)
@@ -262,17 +278,31 @@ def search_worker(activation_vectors,activation_indicies:list[int],feature_vecto
     device = resolve_device(device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     activation_vectors = to_binary_tensor(activation_vectors, device)
+    results = []
     
     for local_activation_index, global_activation_index in enumerate(activation_indicies):
         print(f"Running LevelSearch for global index {global_activation_index}")
-        LevelSearch(activation_vectors[:,local_activation_index],feature_vectors,config)
+        best_formula, best_score = LevelSearch(
+            activation_vectors[:,local_activation_index],
+            feature_vectors,
+            config,
+        )
+        results.append(
+            SearchResult(
+                activation_index=global_activation_index,
+                best_formula=best_formula,
+                best_score=best_score,
+            )
+        )
+
+    return results
 
 def search_worker_from_args(args):
     return search_worker(*args)
 
 def search_all(activation_vectors, feature_vectors, num_workers=1, device=None, config=searchConfig()):
     if num_workers <= 1:
-        search_worker(
+        return search_worker(
             activation_vectors,
             list(range(activation_vectors.shape[1])),
             feature_vectors,
@@ -286,7 +316,7 @@ def search_all(activation_vectors, feature_vectors, num_workers=1, device=None, 
     chunks = activation_index_chunks(activation_vectors.shape[1], num_workers)
     
     if not chunks:
-        return
+        return []
 
     worker_args = [
         (
@@ -301,4 +331,11 @@ def search_all(activation_vectors, feature_vectors, num_workers=1, device=None, 
 
     context = mp.get_context("spawn")
     with context.Pool(processes=len(worker_args)) as pool:
-        pool.map(search_worker_from_args, worker_args)
+        result_chunks = pool.map(search_worker_from_args, worker_args)
+
+    results = [
+        result
+        for chunk in result_chunks
+        for result in chunk
+    ]
+    return sorted(results, key=lambda result: result.activation_index)
