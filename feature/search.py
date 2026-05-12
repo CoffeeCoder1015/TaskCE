@@ -309,7 +309,6 @@ def search_all(activation_vectors, feature_vectors, num_workers=1, device=None, 
             device,
             config
         )
-        return
 
     activation_vectors = to_numpy_bool(activation_vectors)
     feature_vectors = prepare_multiprocessing_feature_vectors(feature_vectors)
