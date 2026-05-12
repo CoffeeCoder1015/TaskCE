@@ -150,7 +150,7 @@ token_counts = count_model_token_ids(
     tokenizer,
     batch_size=512,
 )
-top_token_ids = top_token_counts(token_counts, tokenizer, top_k=4_000)
+top_token_ids = top_token_counts(token_counts, tokenizer, top_k=2_000)
 
 label_vocab_matrices = construct_label_vocab_matrices(
     formatted_dataset,
@@ -208,7 +208,7 @@ print(
     summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
 )
 
-search_results = search_all(fine_pruned_acts[:, :10], feature_vectors)
+search_results = search_all(fine_pruned_acts[:, :10], feature_vectors,num_workers=16)
 lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
 lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
 try:
