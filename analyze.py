@@ -60,6 +60,15 @@ def token_outputs(token_ids, counts, tokenizer, limit=10):
     ]
 
 
+def summarize_postprocessing(binary_acts, pruned_acts, neuron_ids):
+    return {
+        "binary_shape": tuple(binary_acts.shape),
+        "pruned_shape": tuple(pruned_acts.shape),
+        "kept_neuron_count": int(neuron_ids.numel()),
+        "kept_neuron_preview": neuron_ids[:20].tolist(),
+    }
+
+
 def log_class_token_decodes(tokenizer):
     decoded = {}
     print("Target NLI class token ids:")
@@ -107,6 +116,24 @@ def get_classification_weights(model):
     weights = lm_head_weight[class_token_ids].T
     print(f"Classification weights shape: {tuple(weights.shape)}")
     return weights
+
+
+def class_weight_record(classification_weights, neuron_id):
+    weight_ent, weight_neut, weight_contr = classification_weights[neuron_id].tolist()
+    return {
+        "weight_ent": float(weight_ent),
+        "weight_neut": float(weight_neut),
+        "weight_contr": float(weight_contr),
+    }
+
+
+def search_result_record(neuron_id, formula, iou, classification_weights):
+    return {
+        "neuron": neuron_id,
+        "formula": formula,
+        "iou": float(iou),
+        **class_weight_record(classification_weights, neuron_id),
+    }
 
 
 os.makedirs(RESULT_DIR, exist_ok=True)
@@ -172,16 +199,14 @@ base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
 fine_binary_acts = threshold(activations_fine.states, alpha=alpha)
 fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
 
-def summarize_postprocessing(binary_acts, pruned_acts, neuron_ids):
-    return {
-        "binary_shape": tuple(binary_acts.shape),
-        "pruned_shape": tuple(pruned_acts.shape),
-        "kept_neuron_count": int(neuron_ids.numel()),
-        "kept_neuron_preview": neuron_ids[:20].tolist(),
-    }
-
-print( "Base postprocessing:", summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),)
-print( "Finetuned postprocessing:", summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),)
+print(
+    "Base postprocessing:",
+    summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),
+)
+print(
+    "Finetuned postprocessing:",
+    summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
+)
 
 search_results = search_all(fine_pruned_acts[:, :10], feature_vectors)
 lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
@@ -195,28 +220,9 @@ finally:
         torch.cuda.empty_cache()
 
 records = []
-searched_neuron_ids = set()
-
-def class_weight_record(classification_weights, neuron_id):
-    weight_ent, weight_neut, weight_contr = classification_weights[neuron_id].tolist()
-    return {
-        "weight_ent": float(weight_ent),
-        "weight_neut": float(weight_neut),
-        "weight_contr": float(weight_contr),
-    }
-
-
-def search_result_record(neuron_id, formula, iou, classification_weights):
-    return {
-        "neuron": neuron_id,
-        "formula": formula,
-        "iou": float(iou),
-        **class_weight_record(classification_weights, neuron_id),
-    }
 
 for result in search_results:
     neuron_id = int(fine_neuron_ids[result.activation_index])
-    searched_neuron_ids.add(neuron_id)
     records.append(
         search_result_record(
             neuron_id,
@@ -226,8 +232,9 @@ for result in search_results:
         )
     )
 
+kept_neuron_ids = set(fine_neuron_ids.tolist())
 for neuron_id in range(int(fine_binary_acts.shape[1])):
-    if neuron_id in searched_neuron_ids:
+    if neuron_id in kept_neuron_ids:
         continue
     records.append(
         search_result_record(
