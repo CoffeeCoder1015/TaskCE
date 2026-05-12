@@ -88,7 +88,6 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
     
     beam_size = 30
-    formula_length = 6
     queue = []
     # Load queue
     queue_id = 0
@@ -104,9 +103,7 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
     
     best_score = 0
     best_iou = 0
-    max_expansions = beam_size * max(0, formula_length - 1)
-    expansions = 0
-    while queue and expansions < max_expansions:
+    while queue:
         neighbors = []
         for rank_heuristic, _, formula, vector in queue:
             current_iou = abs(rank_heuristic)
@@ -138,16 +135,15 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
 
-def Search(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]]):
-    print("Neuron shape:",neuron.shape)
+def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]]):
+    print("Neuron shape:",neuron_activation.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    scored_features = formula_iou(neuron,feature_vectors,4096)
+    scored_features = formula_iou(neuron_activation,feature_vectors,4096)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
     nonzero_features.sort(key=lambda x: x[0],reverse=True)
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
     
     beam_size = 30
-    formula_length = 6
     queue = []
     # Load queue
     queue_id = 0
@@ -164,9 +160,7 @@ def Search(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tens
     
     best_score = 0
     best_iou = 0
-    max_expansions = beam_size * max(0, formula_length - 1)
-    expansions = 0
-    while queue and expansions < max_expansions:
+    while queue:
         rank_heuristic, _, formula, vector = heapq.heappop(queue)
         formula = simplify_logic(formula)
 
@@ -184,7 +178,7 @@ def Search(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tens
             for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
                 neighbors.append(n)
             
-        scored_neighbors = formula_iou(neuron,neighbors,16384)
+        scored_neighbors = formula_iou(neuron_activation,neighbors,16384)
         for item in scored_neighbors:
             formula = item[1]
             key = formula
@@ -199,7 +193,13 @@ def Search(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tens
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
 
-def search_worker(neurons,feature_vectors):
-    shape = neurons.shape
-    for i in range(shape[1]):
-        LevelSearch(neurons[:,i],feature_vectors)
+def search_worker(activation_vectors,activation_indicies:list[int],feature_vectors,device=None):
+    device = resolve_device(device)
+    feature_vectors = prepare_feature_vectors(feature_vectors, device)
+    activation_vectors = to_binary_tensor(activation_vectors, device)
+    results = []
+    for local_activation_index, global_activation_index in enumerate(activation_indicies):
+        LevelSearch(activation_vectors[:,local_activation_index],feature_vectors)
+
+def search_all(activation_vectors,feature_vectors):
+    pass
