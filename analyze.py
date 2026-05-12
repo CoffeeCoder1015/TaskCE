@@ -277,8 +277,7 @@ print(
 )
 
 # LevelSearch(fine_pruned_acts[:,0],feature_vectors)
-Search(fine_pruned_acts[:,0],feature_vectors)
-search_worker()
+search_worker(fine_pruned_acts,list(range(0,10)),feature_vectors)
 
 # beam_size = 30
 # max_formula_length = 6
