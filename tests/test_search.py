@@ -1,52 +1,104 @@
-from feature.formula import And, Constant, Leaf, Not
-from feature.search import (
-    assert_explanation_formula,
-    is_explanation_formula,
-    length_penalty_factor,
-    simplify_composition,
-    simplified_formula_key,
-)
+from sympy import Symbol
+import torch
+
+from feature.search import LevelSearch, Search, SearchResult, searchConfig, search_all
 
 
-def test_length_penalty_factor_is_clamped_linear():
-    leaf = Leaf(label="tok", token_id=1, token="A")
-    length_two = And(left=leaf, right=leaf)
-
-    assert length_penalty_factor(leaf, 0.01) == 1.0
-    assert length_penalty_factor(length_two, 0.01) == 0.99
-    assert length_penalty_factor(length_two, 2.0) == 0.0
-    constant = And(left=leaf, right=Not(leaf)).simplify_tree()[0]
-    assert length_penalty_factor(constant, 0.01) == 1.0
-
-
-def test_simplified_formula_key_uses_simplified_tree_hash():
-    leaf = Leaf(label="tok", token_id=1, token="A")
-
-    assert simplified_formula_key(And(left=leaf, right=leaf)) == leaf
-    assert hash(simplified_formula_key(And(left=leaf, right=leaf))) == hash(leaf)
+def exact_match_inputs():
+    feature_a = Symbol("tok:A")
+    feature_b = Symbol("tok:B")
+    feature_vectors = [
+        (feature_a, torch.tensor([True, False, False])),
+        (feature_b, torch.tensor([False, True, False])),
+    ]
+    neuron = torch.tensor([True, False, False])
+    return neuron, feature_vectors
 
 
-def test_simplify_composition_returns_simplified_formula_with_original_vector():
-    leaf = Leaf(label="tok", token_id=1, token="A")
-    vector = object()
+def test_search_returns_best_formula_and_score_for_exact_match():
+    neuron, feature_vectors = exact_match_inputs()
 
-    formula, returned_vector = simplify_composition(And(left=leaf, right=leaf), vector)
+    best_formula, best_score = Search(neuron, feature_vectors, config=searchConfig())
 
-    assert formula == leaf
-    assert returned_vector is vector
-
-
-def test_constants_are_not_top_level_explanations():
-    leaf = Leaf(label="tok", token_id=1, token="A")
-
-    assert is_explanation_formula(leaf)
-    assert not is_explanation_formula(Constant(value=True))
+    assert best_formula == "tok:A"
+    assert best_score == 1.0
 
 
-def test_constant_top_level_explanations_raise_assertion():
-    try:
-        assert_explanation_formula(Constant(value=True))
-    except AssertionError as error:
-        assert "Top-level explanation simplified to constant TRUE" in str(error)
-    else:
-        raise AssertionError("Expected constant explanation assertion")
+def test_level_search_returns_best_formula_and_score_for_exact_match():
+    neuron, feature_vectors = exact_match_inputs()
+
+    best_formula, best_score = LevelSearch(neuron, feature_vectors, config=searchConfig())
+
+    assert best_formula == "tok:A"
+    assert best_score == 1.0
+
+
+def test_search_all_serial_returns_indexed_results():
+    feature_a = Symbol("tok:A")
+    feature_b = Symbol("tok:B")
+    feature_vectors = [
+        (feature_a, torch.tensor([True, False, False])),
+        (feature_b, torch.tensor([False, True, False])),
+    ]
+    activation_vectors = torch.tensor(
+        [
+            [True, False],
+            [False, True],
+            [False, False],
+        ]
+    )
+
+    results = search_all(activation_vectors, feature_vectors, device="cpu")
+
+    assert results == [
+        SearchResult(activation_index=0, best_formula="tok:A", best_score=1.0),
+        SearchResult(activation_index=1, best_formula="tok:B", best_score=1.0),
+    ]
+
+
+def test_search_all_parallel_matches_serial_results():
+    feature_a = Symbol("tok:A")
+    feature_b = Symbol("tok:B")
+    feature_vectors = [
+        (feature_a, torch.tensor([True, False, True, False])),
+        (feature_b, torch.tensor([False, True, True, False])),
+    ]
+    activation_vectors = torch.tensor(
+        [
+            [True, False, True],
+            [False, True, True],
+            [True, True, False],
+            [False, False, False],
+        ]
+    )
+    config = searchConfig(pruned_queue_size=2, formula_length=3)
+
+    serial_results = search_all(
+        activation_vectors,
+        feature_vectors,
+        num_workers=1,
+        device="cpu",
+        config=config,
+    )
+    parallel_results = search_all(
+        activation_vectors,
+        feature_vectors,
+        num_workers=2,
+        device="cpu",
+        config=config,
+    )
+
+    assert parallel_results == serial_results
+
+
+def test_search_all_parallel_handles_empty_activation_set():
+    feature = Symbol("tok:A")
+    feature_vectors = [(feature, torch.tensor([True, False]))]
+    activation_vectors = torch.empty((2, 0), dtype=torch.bool)
+
+    assert search_all(
+        activation_vectors,
+        feature_vectors,
+        num_workers=2,
+        device="cpu",
+    ) == []
