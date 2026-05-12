@@ -1,5 +1,6 @@
-import heapq
+﻿import heapq
 import multiprocessing as mp
+from dataclasses import dataclass
 import numpy as np
 
 from sympy import Symbol, simplify_logic
@@ -80,19 +81,27 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
 
     return new_compositions
 
-def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]]):
+@dataclass
+class searchConfig:
+    formula_length: int = 6
+    pruned_queue_size: int = 30 # The beam size
+    max_iterations: int = 50
+    length_penalty: float = 0.01
+    iou_calculation_batch_size: int = 16384
+
+def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    scored_features = formula_iou(neuron,feature_vectors,4096)
+    scored_features = formula_iou(neuron,feature_vectors,config.iou_calculation_batch_size)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
     nonzero_features.sort(key=lambda x: x[0],reverse=True)
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
-    
-    beam_size = 30
+
+    beam_size = config.pruned_queue_size
     queue = []
     # Load queue
     queue_id = 0
-    penalty = 0.01
+    penalty = config.length_penalty
     score_track = {}
     for item in nonzero_features:
         heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
@@ -104,7 +113,9 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
     
     best_score = 0
     best_iou = 0
-    while queue:
+
+    iterations = 0
+    while queue and iterations < config.max_iterations:
         neighbors = []
         for rank_heuristic, _, formula, vector in queue:
             current_iou = abs(rank_heuristic)
@@ -116,12 +127,17 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
                 print("iou:",current_iou,logic_str(formula))
                 best_iou = current_iou
 
+
+            length = formula.count(Symbol)
+            if length >= config.formula_length:
+                continue # Do not expand formula at max length
+
             for _, neighbor_formula, neighbor_vector in nonzero_features:
                 for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
                     neighbors.append(n)
             
         new_queue = []
-        scored_neighbors = formula_iou(neuron,neighbors,16384)
+        scored_neighbors = formula_iou(neuron,neighbors,config.iou_calculation_batch_size)
         for item in scored_neighbors:
             key = tensor_key(item[2])
             prior_score = score_track.get(key,0)
@@ -135,20 +151,21 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
         if len(queue) > beam_size:
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
+        iterations += 1
 
-def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]]):
+def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
     print("Neuron shape:",neuron_activation.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    scored_features = formula_iou(neuron_activation,feature_vectors,4096)
+    scored_features = formula_iou(neuron_activation,feature_vectors,config.iou_calculation_batch_size)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
     nonzero_features.sort(key=lambda x: x[0],reverse=True)
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
-    
-    beam_size = 30
+
+    beam_size = config.pruned_queue_size
     queue = []
     # Load queue
     queue_id = 0
-    penalty = 0.01
+    penalty = config.length_penalty
     score_track = {}
     for item in nonzero_features:
         formula = item[1]
@@ -161,7 +178,9 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
     
     best_score = 0
     best_iou = 0
-    while queue:
+
+    iterations = 0
+    while queue and iterations < config.max_iterations:
         rank_heuristic, _, formula, vector = heapq.heappop(queue)
         formula = simplify_logic(formula)
 
@@ -174,12 +193,16 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
             print("iou:",current_iou,logic_str(formula))
             best_iou = current_iou
 
+        length = formula.count(Symbol)
+        if length >= config.formula_length:
+            continue # Do not expand formula at max length
+
         neighbors = []
         for _, neighbor_formula, neighbor_vector in nonzero_features:
             for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
                 neighbors.append(n)
-            
-        scored_neighbors = formula_iou(neuron_activation,neighbors,16384)
+
+        scored_neighbors = formula_iou(neuron_activation,neighbors,config.iou_calculation_batch_size)
         for item in scored_neighbors:
             formula = item[1]
             key = formula
@@ -193,6 +216,8 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
         if len(queue) > beam_size:
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
+
+        iterations+=1
 
 def to_numpy_bool(value):
     if isinstance(value, torch.Tensor):
@@ -218,25 +243,26 @@ def activation_index_chunks(total_activations, num_workers):
         start = stop
     return chunks
 
-def search_worker(activation_vectors,activation_indicies:list[int],feature_vectors,device=None):
+def search_worker(activation_vectors,activation_indicies:list[int],feature_vectors,device=None,config=searchConfig()):
     device = resolve_device(device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     activation_vectors = to_binary_tensor(activation_vectors, device)
     
     for local_activation_index, global_activation_index in enumerate(activation_indicies):
         print(f"Running LevelSearch for global index {global_activation_index}")
-        LevelSearch(activation_vectors[:,local_activation_index],feature_vectors)
+        LevelSearch(activation_vectors[:,local_activation_index],feature_vectors,config)
 
 def search_worker_from_args(args):
     return search_worker(*args)
 
-def search_all(activation_vectors, feature_vectors, num_workers=1, device=None):
+def search_all(activation_vectors, feature_vectors, num_workers=1, device=None, config=searchConfig()):
     if num_workers <= 1:
         search_worker(
             activation_vectors,
             list(range(activation_vectors.shape[1])),
             feature_vectors,
-            device
+            device,
+            config
         )
         return
 
@@ -253,6 +279,7 @@ def search_all(activation_vectors, feature_vectors, num_workers=1, device=None):
             list(range(start, stop)),
             feature_vectors,
             device,
+            config,
         )
         for start, stop in chunks
     ]
