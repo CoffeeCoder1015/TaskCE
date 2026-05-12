@@ -2,28 +2,13 @@ import heapq
 
 from sympy import Symbol, simplify_logic
 
+import sympy
 import torch
 # from feature.formula import And, Not, Or 
 from feature.formula import logic_str
 from sympy.logic import And, Or, Not
 
-def batched_iou(neuron,binary_vecs):
-    intersections = (binary_vecs & neuron).sum(dim=1)
-    unions = (binary_vecs | neuron).sum(dim=1)
-    raw_scores = intersections.float() / unions.clamp_min(1).float()
-    return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
-
-def formula_iou(neuron,formulas_vectors,batch_size):
-    candidates = []
-    for i in range(0, len(formulas_vectors), batch_size):
-        batch = formulas_vectors[i:i+batch_size]
-        formulas = [formula for formula, _ in batch]
-        binary_vectors =[bin_vec for _, bin_vec in batch] 
-        vectors = torch.stack(binary_vectors)
-        iou = batched_iou(neuron,vectors)
-        candidates.extend(zip(iou.tolist(),formulas,binary_vectors))
-    return candidates
-
+# Helper functions for compute
 def resolve_device(device=None):
     if device is not None:
         return torch.device(device)
@@ -42,6 +27,25 @@ def prepare_feature_vectors(feature_vectors, device):
         for formula, binary_vector in feature_vectors
     ]
 
+
+def batched_iou(neuron,binary_vecs):
+    intersections = (binary_vecs & neuron).sum(dim=1)
+    unions = (binary_vecs | neuron).sum(dim=1)
+    raw_scores = intersections.float() / unions.clamp_min(1).float()
+    return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
+
+def formula_iou(neuron,formulas_vectors,batch_size):
+    candidates = []
+    for i in range(0, len(formulas_vectors), batch_size):
+        batch = formulas_vectors[i:i+batch_size]
+        formulas = [formula for formula, _ in batch]
+        binary_vectors =[bin_vec for _, bin_vec in batch] 
+        vectors = torch.stack(binary_vectors)
+        iou = batched_iou(neuron,vectors)
+        candidates.extend(zip(iou.tolist(),formulas,binary_vectors))
+    return candidates
+
+
 # Hash keys to not visit them again
 def tensor_key(vector):
     vector = vector.detach().to(device="cpu", dtype=torch.bool).contiguous()
@@ -51,41 +55,34 @@ def length_penalty_factor(formula, penalty):
     length = formula.count(Symbol)
     return max(0.0, 1.0 - penalty * (length - 1))
 
+
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
     new_compositions = []
 
-    if torch.any(current_vector & ~feature_vector).item():
-        new_compositions.append(
-            (
-                And(current_formula, feature_formula),
-                current_vector & feature_vector,
-            )
-        )
-    if torch.any(feature_vector & ~current_vector).item():
-        new_compositions.append(
-            (
-                Or(current_formula, feature_formula),
-                current_vector | feature_vector,
-            )
-        )
-    if (
-        current_formula != feature_formula
-        and torch.any(current_vector & feature_vector).item()
-    ):
-        new_compositions.append(
-            (
-                And(current_formula, Not(feature_formula)),
-                current_vector & ~feature_vector,
-            )
-        )
+    # No checks for repetition
+    # new_compositions.append((And(current_formula, feature_formula), current_vector & feature_vector))
+    # new_compositions.append((Or(current_formula, feature_formula), current_vector | feature_vector))
+    # new_compositions.append((And(current_formula, Not(feature_formula)), current_vector & ~feature_vector))
+    
+    # Checks for repetition
+    c_and_f = current_vector & feature_vector
+    if torch.any(c_and_f).item() and not torch.equal(c_and_f, current_vector) and not torch.equal(c_and_f, feature_vector):
+        new_compositions.append((And(current_formula, feature_formula), c_and_f))
+
+    c_or_f = current_vector | feature_vector
+    if torch.any(feature_vector & ~current_vector).item() and not torch.equal(c_or_f, feature_vector):
+        new_compositions.append((Or(current_formula, feature_formula), c_or_f))
+
+    c_and_nf = current_vector & ~feature_vector
+    if current_formula != feature_formula and torch.any(c_and_nf).item() and not torch.equal(c_and_nf, current_vector):
+        new_compositions.append((And(current_formula, Not(feature_formula)), c_and_nf))
+
     return new_compositions
 
-def LevelSearch(neuron,feature_vectors):
-    device = resolve_device()
+def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]]):
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    neuron = to_binary_tensor(neuron,device)
-    scored_features = formula_iou(neuron,prepare_feature_vectors(feature_vectors,device),4096)
+    scored_features = formula_iou(neuron,feature_vectors,4096)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
     nonzero_features.sort(key=lambda x: x[0],reverse=True)
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
@@ -110,8 +107,6 @@ def LevelSearch(neuron,feature_vectors):
     max_expansions = beam_size * max(0, formula_length - 1)
     expansions = 0
     while queue and expansions < max_expansions:
-        # rank_heuristic, _, formula, vector = heapq.heappop(queue)
-
         neighbors = []
         for rank_heuristic, _, formula, vector in queue:
             current_iou = abs(rank_heuristic)
@@ -143,12 +138,10 @@ def LevelSearch(neuron,feature_vectors):
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
 
-def Search(neuron,feature_vectors):
-    device = resolve_device()
+def Search(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]]):
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    neuron = to_binary_tensor(neuron,device)
-    scored_features = formula_iou(neuron,prepare_feature_vectors(feature_vectors,device),4096)
+    scored_features = formula_iou(neuron,feature_vectors,4096)
     nonzero_features = [feature for feature in scored_features if feature[0] > 0]
     nonzero_features.sort(key=lambda x: x[0],reverse=True)
     print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
