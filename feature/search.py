@@ -1,4 +1,6 @@
 import heapq
+import multiprocessing as mp
+import numpy as np
 
 from sympy import Symbol, simplify_logic
 
@@ -19,7 +21,6 @@ def resolve_device(device=None):
 
 def to_binary_tensor(value, device):
     return torch.as_tensor(value, dtype=torch.bool, device=device)
-
 
 def prepare_feature_vectors(feature_vectors, device):
     return [
@@ -193,13 +194,69 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
             queue = heapq.nsmallest(beam_size, queue)
             heapq.heapify(queue)
 
+def to_numpy_bool(value):
+    if isinstance(value, torch.Tensor):
+        return value.detach().cpu().numpy().astype(np.bool_, copy=False)
+    return np.asarray(value, dtype=np.bool_)
+
+def prepare_multiprocessing_feature_vectors(feature_vectors):
+    return [
+        (formula, to_numpy_bool(binary_vector))
+        for formula, binary_vector in feature_vectors
+    ]
+
+def activation_index_chunks(total_activations, num_workers):
+    if total_activations == 0:
+        return []
+    worker_count = min(max(1, num_workers), total_activations)
+    chunk_size, remainder = divmod(total_activations, worker_count)
+    chunks = []
+    start = 0
+    for worker_index in range(worker_count):
+        stop = start + chunk_size + (1 if worker_index < remainder else 0)
+        chunks.append((start, stop))
+        start = stop
+    return chunks
+
 def search_worker(activation_vectors,activation_indicies:list[int],feature_vectors,device=None):
     device = resolve_device(device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     activation_vectors = to_binary_tensor(activation_vectors, device)
-    results = []
+    
     for local_activation_index, global_activation_index in enumerate(activation_indicies):
+        print(f"Running LevelSearch for global index {global_activation_index}")
         LevelSearch(activation_vectors[:,local_activation_index],feature_vectors)
 
-def search_all(activation_vectors,feature_vectors):
-    pass
+def search_worker_from_args(args):
+    return search_worker(*args)
+
+def search_all(activation_vectors, feature_vectors, num_workers=1, device=None):
+    if num_workers <= 1:
+        search_worker(
+            activation_vectors,
+            list(range(activation_vectors.shape[1])),
+            feature_vectors,
+            device
+        )
+        return
+
+    activation_vectors = to_numpy_bool(activation_vectors)
+    feature_vectors = prepare_multiprocessing_feature_vectors(feature_vectors)
+    chunks = activation_index_chunks(activation_vectors.shape[1], num_workers)
+    
+    if not chunks:
+        return
+
+    worker_args = [
+        (
+            activation_vectors[:, start:stop], # Pre-chunk so each subprocess doesn't get the entire copy of activation vectors
+            list(range(start, stop)),
+            feature_vectors,
+            device,
+        )
+        for start, stop in chunks
+    ]
+
+    context = mp.get_context("spawn")
+    with context.Pool(processes=len(worker_args)) as pool:
+        pool.map(search_worker_from_args, worker_args)
