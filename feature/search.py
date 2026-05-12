@@ -11,6 +11,11 @@ import torch
 from feature.formula import logic_str
 from sympy.logic import And, Or, Not
 
+@dataclass
+class SearchState:
+    formula: sympy.Expr
+    vector: torch.Tensor
+
 # Helper functions for compute
 def resolve_device(device=None):
     if device is not None:
@@ -36,16 +41,14 @@ def batched_iou(neuron,binary_vecs):
     raw_scores = intersections.float() / unions.clamp_min(1).float()
     return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
 
-def formula_iou(neuron,formulas_vectors,batch_size):
-    candidates = []
-    for i in range(0, len(formulas_vectors), batch_size):
-        batch = formulas_vectors[i:i+batch_size]
-        formulas = [formula for formula, _ in batch]
-        binary_vectors =[bin_vec for _, bin_vec in batch] 
-        vectors = torch.stack(binary_vectors)
-        iou = batched_iou(neuron,vectors)
-        candidates.extend(zip(iou.tolist(),formulas,binary_vectors))
-    return candidates
+def calculate_ious(neuron, vector_list, batch_size):
+    ious = []
+    for i in range(0, len(vector_list), batch_size):
+        batch = vector_list[i:i+batch_size]
+        vectors = torch.stack(batch)
+        iou = batched_iou(neuron, vectors)
+        ious.extend(iou.tolist())
+    return ious
 
 
 # Hash keys to not visit them again
@@ -62,22 +65,22 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
     new_compositions = []
 
     # No checks for repetition
-    # new_compositions.append((And(current_formula, feature_formula), current_vector & feature_vector))
-    # new_compositions.append((Or(current_formula, feature_formula), current_vector | feature_vector))
-    # new_compositions.append((And(current_formula, Not(feature_formula)), current_vector & ~feature_vector))
+    # new_compositions.append(SearchState(And(current_formula, feature_formula), current_vector & feature_vector))
+    # new_compositions.append(SearchState(Or(current_formula, feature_formula), current_vector | feature_vector))
+    # new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), current_vector & ~feature_vector))
     
     # Checks for repetition
     c_and_f = current_vector & feature_vector
     if torch.any(c_and_f).item() and not torch.equal(c_and_f, current_vector) and not torch.equal(c_and_f, feature_vector):
-        new_compositions.append((And(current_formula, feature_formula), c_and_f))
+        new_compositions.append(SearchState(And(current_formula, feature_formula), c_and_f))
 
     c_or_f = current_vector | feature_vector
     if torch.any(feature_vector & ~current_vector).item() and not torch.equal(c_or_f, feature_vector):
-        new_compositions.append((Or(current_formula, feature_formula), c_or_f))
+        new_compositions.append(SearchState(Or(current_formula, feature_formula), c_or_f))
 
     c_and_nf = current_vector & ~feature_vector
     if current_formula != feature_formula and torch.any(c_and_nf).item() and not torch.equal(c_and_nf, current_vector):
-        new_compositions.append((And(current_formula, Not(feature_formula)), c_and_nf))
+        new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), c_and_nf))
 
     return new_compositions
 
@@ -92,10 +95,14 @@ class searchConfig:
 def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    scored_features = formula_iou(neuron,feature_vectors,config.iou_calculation_batch_size)
-    nonzero_features = [feature for feature in scored_features if feature[0] > 0]
-    nonzero_features.sort(key=lambda x: x[0],reverse=True)
-    print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
+
+    states = [SearchState(formula, vector) for formula, vector in feature_vectors]
+    vectors = [state.vector for state in states]
+    ious = calculate_ious(neuron, vectors, config.iou_calculation_batch_size)
+    
+    nonzero_features = [(iou, state) for iou, state in zip(ious, states) if iou > 0]
+    nonzero_features.sort(key=lambda x: x[0], reverse=True)
+    print("Pre/Post zero filtering:", len(states), len(nonzero_features))
 
     beam_size = config.pruned_queue_size
     queue = []
@@ -103,10 +110,10 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
     queue_id = 0
     penalty = config.length_penalty
     score_track = {}
-    for item in nonzero_features:
-        heapq.heappush(queue,(-item[0],queue_id,item[1],item[2]))
-        score_track[tensor_key(item[2])] = item[0]
-        queue_id+=1
+    for iou, state in nonzero_features:
+        heapq.heappush(queue, (-iou, queue_id, state))
+        score_track[tensor_key(state.vector)] = iou
+        queue_id += 1
     if len(queue) > beam_size:
         queue = heapq.nsmallest(beam_size, queue)
         heapq.heapify(queue)
@@ -117,35 +124,38 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
     iterations = 0
     while queue and iterations < config.max_iterations:
         neighbors = []
-        for rank_heuristic, _, formula, vector in queue:
+        for rank_heuristic, _, state in queue:
+            formula = state.formula
+            vector = state.vector
             current_iou = abs(rank_heuristic)
-            current_score = current_iou * length_penalty_factor(formula,penalty)
+            current_score = current_iou * length_penalty_factor(formula, penalty)
             if current_score > best_score:
-                print("score:",current_score,logic_str(formula))
+                print("score:", current_score, logic_str(formula))
                 best_score = current_score
             if current_iou > best_iou:
-                print("iou:",current_iou,logic_str(formula))
+                print("iou:", current_iou, logic_str(formula))
                 best_iou = current_iou
-
 
             length = formula.count(Symbol)
             if length >= config.formula_length:
                 continue # Do not expand formula at max length
 
-            for _, neighbor_formula, neighbor_vector in nonzero_features:
-                for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
+            for _, neighbor_state in nonzero_features:
+                for n in get_compositions(formula, vector, neighbor_state.formula, neighbor_state.vector):
                     neighbors.append(n)
             
         new_queue = []
-        scored_neighbors = formula_iou(neuron,neighbors,config.iou_calculation_batch_size)
-        for item in scored_neighbors:
-            key = tensor_key(item[2])
-            prior_score = score_track.get(key,0)
-            score = abs(item[0]) * length_penalty_factor(item[1],penalty)
-            if score  > prior_score:
-                score_track[key] = score
-                heapq.heappush(new_queue,(-item[0],queue_id,item[1],item[2]))
-                queue_id+=1
+        if neighbors:
+            neighbor_vectors = [n.vector for n in neighbors]
+            scored_ious = calculate_ious(neuron, neighbor_vectors, config.iou_calculation_batch_size)
+            for state, iou in zip(neighbors, scored_ious):
+                key = tensor_key(state.vector)
+                prior_score = score_track.get(key, 0)
+                score = iou * length_penalty_factor(state.formula, penalty)
+                if score > prior_score:
+                    score_track[key] = score
+                    heapq.heappush(new_queue, (-iou, queue_id, state))
+                    queue_id += 1
         
         queue = new_queue
         if len(queue) > beam_size:
@@ -156,10 +166,14 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
 def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
     print("Neuron shape:",neuron_activation.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
-    scored_features = formula_iou(neuron_activation,feature_vectors,config.iou_calculation_batch_size)
-    nonzero_features = [feature for feature in scored_features if feature[0] > 0]
-    nonzero_features.sort(key=lambda x: x[0],reverse=True)
-    print("Pre/Post zero filtering:",len(scored_features),len(nonzero_features))
+
+    states = [SearchState(formula, vector) for formula, vector in feature_vectors]
+    vectors = [state.vector for state in states]
+    ious = calculate_ious(neuron_activation, vectors, config.iou_calculation_batch_size)
+    
+    nonzero_features = [(iou, state) for iou, state in zip(ious, states) if iou > 0]
+    nonzero_features.sort(key=lambda x: x[0], reverse=True)
+    print("Pre/Post zero filtering:", len(states), len(nonzero_features))
 
     beam_size = config.pruned_queue_size
     queue = []
@@ -167,11 +181,10 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
     queue_id = 0
     penalty = config.length_penalty
     score_track = {}
-    for item in nonzero_features:
-        formula = item[1]
-        heapq.heappush(queue,(-item[0],queue_id,formula,item[2]))
-        score_track[formula] = item[0]
-        queue_id+=1
+    for iou, state in nonzero_features:
+        heapq.heappush(queue, (-iou, queue_id, state))
+        score_track[state.formula] = iou
+        queue_id += 1
     if len(queue) > beam_size:
         queue = heapq.nsmallest(beam_size, queue)
         heapq.heapify(queue)
@@ -181,16 +194,17 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
 
     iterations = 0
     while queue and iterations < config.max_iterations:
-        rank_heuristic, _, formula, vector = heapq.heappop(queue)
-        formula = simplify_logic(formula)
+        rank_heuristic, _, state = heapq.heappop(queue)
+        formula = simplify_logic(state.formula)
+        vector = state.vector
 
         current_iou = abs(rank_heuristic)
-        current_score = current_iou * length_penalty_factor(formula,penalty)
+        current_score = current_iou * length_penalty_factor(formula, penalty)
         if current_score > best_score:
-            print("score:",current_score,logic_str(formula))
+            print("score:", current_score, logic_str(formula))
             best_score = current_score
         if current_iou > best_iou:
-            print("iou:",current_iou,logic_str(formula))
+            print("iou:", current_iou, logic_str(formula))
             best_iou = current_iou
 
         length = formula.count(Symbol)
@@ -198,20 +212,21 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
             continue # Do not expand formula at max length
 
         neighbors = []
-        for _, neighbor_formula, neighbor_vector in nonzero_features:
-            for n in get_compositions(formula,vector,neighbor_formula,neighbor_vector):
+        for _, neighbor_state in nonzero_features:
+            for n in get_compositions(formula, vector, neighbor_state.formula, neighbor_state.vector):
                 neighbors.append(n)
 
-        scored_neighbors = formula_iou(neuron_activation,neighbors,config.iou_calculation_batch_size)
-        for item in scored_neighbors:
-            formula = item[1]
-            key = formula
-            prior_score = score_track.get(key,0)
-            score = abs(item[0]) * length_penalty_factor(formula,penalty)
-            if score  > prior_score:
-                score_track[key] = score
-                heapq.heappush(queue,(-item[0],queue_id,formula,item[2]))
-                queue_id+=1
+        if neighbors:
+            neighbor_vectors = [n.vector for n in neighbors]
+            scored_ious = calculate_ious(neuron_activation, neighbor_vectors, config.iou_calculation_batch_size)
+            for state, iou in zip(neighbors, scored_ious):
+                key = state.formula
+                prior_score = score_track.get(key, 0)
+                score = iou * length_penalty_factor(state.formula, penalty)
+                if score > prior_score:
+                    score_track[key] = score
+                    heapq.heappush(queue, (-iou, queue_id, state))
+                    queue_id += 1
         
         if len(queue) > beam_size:
             queue = heapq.nsmallest(beam_size, queue)
