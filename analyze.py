@@ -136,135 +136,136 @@ def search_result_record(neuron_id, formula, iou, classification_weights):
     }
 
 
-os.makedirs(RESULT_DIR, exist_ok=True)
-dataset = load_dataset("snli", split="validation", trust_remote_code=True)
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-log_class_token_decodes(tokenizer)
+if __name__ == "__main__":
+    os.makedirs(RESULT_DIR, exist_ok=True)
+    dataset = load_dataset("snli", split="validation", trust_remote_code=True)
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    log_class_token_decodes(tokenizer)
 
-formatted_dataset = dataset.map(
-    format_snli_text,
-    remove_columns=dataset.column_names,
-)
-token_counts = count_model_token_ids(
-    formatted_dataset,
-    tokenizer,
-    batch_size=512,
-)
-top_token_ids = top_token_counts(token_counts, tokenizer, top_k=2_000)
+    formatted_dataset = dataset.map(
+        format_snli_text,
+        remove_columns=dataset.column_names,
+    )
+    token_counts = count_model_token_ids(
+        formatted_dataset,
+        tokenizer,
+        batch_size=512,
+    )
+    top_token_ids = top_token_counts(token_counts, tokenizer, top_k=2_000)
 
-label_vocab_matrices = construct_label_vocab_matrices(
-    formatted_dataset,
-    tokenizer,
-    batch_size=512,
-)
-feature_vectors = construct_vectors(
-    label_vocab_matrices,
-    top_token_ids,
-    tokenizer,
-)
-
-print(f"Rows: {len(formatted_dataset)}")
-print(f"Fields: {formatted_dataset.column_names}")
-print(f"Occurrence observations: {int(token_counts.sum())}")
-print(f"Top token count: {len(top_token_ids)}")
-print(f"Label vocab matrix shapes: { {k: v.shape for k, v in label_vocab_matrices.items()} }")
-print(f"Final binary feature count: {len(feature_vectors)}")
-print(f"Final binary feature vector length: {len(feature_vectors[0][1])}")
-print(f"Final binary feature nonzeros: {sum(vector.sum() for _, vector in feature_vectors)}")
-print("First 10 feature names:", [formula for formula, _ in feature_vectors[:10]])
-print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
-
-capture_results = Capture(
-    model_id=MODEL_ID,
-    lora_dir=LORA_DIR,
-    tasks=[
-        CaptureConfig(
-            name="snli",
-            dataset=dataset,
-            data_formatter=format_snli_for_capture,
-        )
-    ],
-    layer=-2,
-    batch_size=256,
-)
-
-activations_base = capture_results["snli"]["base"]
-activations_fine = capture_results["snli"]["finetuned"]
-print(activations_base)
-print(activations_fine)
-
-alpha = 0.055
-base_binary_acts = threshold(activations_base.states, alpha=alpha)
-base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
-fine_binary_acts = threshold(activations_fine.states, alpha=alpha)
-fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
-
-print(
-    "Base postprocessing:",
-    summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),
-)
-print(
-    "Finetuned postprocessing:",
-    summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
-)
-
-search_results = search_all(fine_pruned_acts[:, :10], feature_vectors,num_workers=16)
-lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
-lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
-try:
-    classification_weights = get_classification_weights(lm_head_model)
-finally:
-    del lm_head_model
-    gc.collect()
-    if torch.cuda.is_available():
-        torch.cuda.empty_cache()
-
-records = []
-
-for result in search_results:
-    neuron_id = int(fine_neuron_ids[result.activation_index])
-    records.append(
-        search_result_record(
-            neuron_id,
-            result.best_formula,
-            result.best_score,
-            classification_weights,
-        )
+    label_vocab_matrices = construct_label_vocab_matrices(
+        formatted_dataset,
+        tokenizer,
+        batch_size=512,
+    )
+    feature_vectors = construct_vectors(
+        label_vocab_matrices,
+        top_token_ids,
+        tokenizer,
     )
 
-kept_neuron_ids = set(fine_neuron_ids.tolist())
-for neuron_id in range(int(fine_binary_acts.shape[1])):
-    if neuron_id in kept_neuron_ids:
-        continue
-    records.append(
-        search_result_record(
-            neuron_id,
-            "LOW_ACTS_PRUNED",
-            0.0,
-            classification_weights,
-        )
+    print(f"Rows: {len(formatted_dataset)}")
+    print(f"Fields: {formatted_dataset.column_names}")
+    print(f"Occurrence observations: {int(token_counts.sum())}")
+    print(f"Top token count: {len(top_token_ids)}")
+    print(f"Label vocab matrix shapes: { {k: v.shape for k, v in label_vocab_matrices.items()} }")
+    print(f"Final binary feature count: {len(feature_vectors)}")
+    print(f"Final binary feature vector length: {len(feature_vectors[0][1])}")
+    print(f"Final binary feature nonzeros: {sum(vector.sum() for _, vector in feature_vectors)}")
+    print("First 10 feature names:", [formula for formula, _ in feature_vectors[:10]])
+    print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
+
+    capture_results = Capture(
+        model_id=MODEL_ID,
+        lora_dir=LORA_DIR,
+        tasks=[
+            CaptureConfig(
+                name="snli",
+                dataset=dataset,
+                data_formatter=format_snli_for_capture,
+            )
+        ],
+        layer=-2,
+        batch_size=256,
     )
 
-beam_df = pd.DataFrame(
-    records,
-    columns=[
-        "neuron",
-        "formula",
-        "iou",
-        "weight_ent",
-        "weight_neut",
-        "weight_contr",
-    ],
-).sort_values("iou", ascending=False, ignore_index=True)
+    activations_base = capture_results["snli"]["base"]
+    activations_fine = capture_results["snli"]["finetuned"]
+    print(activations_base)
+    print(activations_fine)
 
-print("\nSearch result dataframe stats:")
-print(f"Rows: {len(beam_df)}")
-print(f"Columns: {list(beam_df.columns)}")
-print("\nNumeric summary:")
-print(beam_df.describe(include="number").to_string())
-print("\nTop 10 formulas:")
-print(beam_df["formula"].value_counts().head(10).to_string())
+    alpha = 0.055
+    base_binary_acts = threshold(activations_base.states, alpha=alpha)
+    base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
+    fine_binary_acts = threshold(activations_fine.states, alpha=alpha)
+    fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
 
-os.makedirs(os.path.dirname(BEAM_RESULTS_CSV), exist_ok=True)
-beam_df.to_csv(BEAM_RESULTS_CSV, index=False)
-print(f"Saved search result dataframe: {BEAM_RESULTS_CSV}")
+    print(
+        "Base postprocessing:",
+        summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),
+    )
+    print(
+        "Finetuned postprocessing:",
+        summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
+    )
+
+    search_results = search_all(fine_pruned_acts, feature_vectors, num_workers=16)
+    lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
+    lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
+    try:
+        classification_weights = get_classification_weights(lm_head_model)
+    finally:
+        del lm_head_model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+    records = []
+
+    for result in search_results:
+        neuron_id = int(fine_neuron_ids[result.activation_index])
+        records.append(
+            search_result_record(
+                neuron_id,
+                result.best_formula,
+                result.best_score,
+                classification_weights,
+            )
+        )
+
+    kept_neuron_ids = set(fine_neuron_ids.tolist())
+    for neuron_id in range(int(fine_binary_acts.shape[1])):
+        if neuron_id in kept_neuron_ids:
+            continue
+        records.append(
+            search_result_record(
+                neuron_id,
+                "LOW_ACTS_PRUNED",
+                0.0,
+                classification_weights,
+            )
+        )
+
+    beam_df = pd.DataFrame(
+        records,
+        columns=[
+            "neuron",
+            "formula",
+            "iou",
+            "weight_ent",
+            "weight_neut",
+            "weight_contr",
+        ],
+    ).sort_values("iou", ascending=False, ignore_index=True)
+
+    print("\nSearch result dataframe stats:")
+    print(f"Rows: {len(beam_df)}")
+    print(f"Columns: {list(beam_df.columns)}")
+    print("\nNumeric summary:")
+    print(beam_df.describe(include="number").to_string())
+    print("\nTop 10 formulas:")
+    print(beam_df["formula"].value_counts().head(10).to_string())
+
+    os.makedirs(os.path.dirname(BEAM_RESULTS_CSV), exist_ok=True)
+    beam_df.to_csv(BEAM_RESULTS_CSV, index=False)
+    print(f"Saved search result dataframe: {BEAM_RESULTS_CSV}")
