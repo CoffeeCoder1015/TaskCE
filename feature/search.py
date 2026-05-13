@@ -195,7 +195,7 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
     score_track = {}
     for iou, state in nonzero_features:
         heapq.heappush(queue, (-iou, queue_id, state))
-        score_track[state.formula] = iou
+        score_track[tensor_key(state.vector)] = iou
         queue_id += 1
     if len(queue) > beam_size:
         queue = heapq.nsmallest(beam_size, queue)
@@ -234,7 +234,7 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
             neighbor_vectors = [n.vector for n in neighbors]
             scored_ious = calculate_ious(neuron_activation, neighbor_vectors, config.iou_calculation_batch_size)
             for state, iou in zip(neighbors, scored_ious):
-                key = state.formula
+                key = tensor_key(state.vector)
                 prior_score = score_track.get(key, 0)
                 score = iou * length_penalty_factor(state.formula, penalty)
                 if score > prior_score:
