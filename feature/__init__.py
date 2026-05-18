@@ -1,3 +1,11 @@
+"""Compositional explanation tools for activation patterns.
+
+The feature package builds interpretable binary feature vectors from tokenized
+datasets, represents feature formulas, and searches for logical compositions
+that explain activation patterns. Its scope is compositional explanations: it
+connects captured model activations to candidate feature formulas for later
+experiment-level analysis.
+"""
 from feature.batch import batched
 from feature.find import (
     SKIP_TOKENS,
@@ -10,7 +18,6 @@ from feature.formula import And, Leaf, Not, Or
 
 __all__ = [
     "And",
-    "Constant",
     "Leaf",
     "Not",
     "Or",
