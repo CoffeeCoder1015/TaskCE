@@ -2,6 +2,7 @@ import numpy as np
 from scipy.sparse import csr_matrix, hstack
 
 from feature.batch import batched
+from feature.find import count_model_token_ids, top_token_counts
 from feature.formula import Leaf
 from sympy import Symbol
 
@@ -71,4 +72,29 @@ def construct_vectors(label_vocab_matrices, features, tokenizer):
             )
             feature_index += 1
 
+    return feature_vectors
+
+def ConstructFeatures(
+    dataset,
+    tokenizer,
+    batch_size=512,
+    top_k=200
+):
+    token_counts = count_model_token_ids(
+        dataset=dataset,
+        tokenizer=tokenizer,
+        batch_size=batch_size
+    )
+    top_token_ids = top_token_counts(token_counts, tokenizer, top_k=top_k)
+
+    label_vocab_matrices = construct_label_vocab_matrices(
+        dataset,
+        tokenizer,
+        batch_size=512,
+    )
+    feature_vectors = construct_vectors(
+        label_vocab_matrices,
+        top_token_ids,
+        tokenizer,
+    )
     return feature_vectors
