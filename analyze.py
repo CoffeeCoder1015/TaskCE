@@ -1,6 +1,7 @@
 import gc
 import os
 
+from cv2 import Formatter_FMT_DEFAULT
 from datasets import load_dataset
 import pandas as pd
 from feature.search import search_all
@@ -12,7 +13,7 @@ from feature import (
     count_model_token_ids,
     top_token_counts,
 )
-from feature.construct import construct_label_vocab_matrices, construct_vectors
+from feature.construct import ConstructFeatures, construct_label_vocab_matrices, construct_vectors
 from capture import Capture, CaptureConfig
 from capture.postprocessing import prune_min_acts, threshold
 
@@ -146,34 +147,10 @@ if __name__ == "__main__":
         format_snli_text,
         remove_columns=dataset.column_names,
     )
-    token_counts = count_model_token_ids(
+    feature_vectors = ConstructFeatures(
         formatted_dataset,
-        tokenizer,
-        batch_size=512,
+        tokenizer
     )
-    top_token_ids = top_token_counts(token_counts, tokenizer, top_k=2_000)
-
-    label_vocab_matrices = construct_label_vocab_matrices(
-        formatted_dataset,
-        tokenizer,
-        batch_size=512,
-    )
-    feature_vectors = construct_vectors(
-        label_vocab_matrices,
-        top_token_ids,
-        tokenizer,
-    )
-
-    print(f"Rows: {len(formatted_dataset)}")
-    print(f"Fields: {formatted_dataset.column_names}")
-    print(f"Occurrence observations: {int(token_counts.sum())}")
-    print(f"Top token count: {len(top_token_ids)}")
-    print(f"Label vocab matrix shapes: { {k: v.shape for k, v in label_vocab_matrices.items()} }")
-    print(f"Final binary feature count: {len(feature_vectors)}")
-    print(f"Final binary feature vector length: {len(feature_vectors[0][1])}")
-    print(f"Final binary feature nonzeros: {sum(vector.sum() for _, vector in feature_vectors)}")
-    print("First 10 feature names:", [formula for formula, _ in feature_vectors[:10]])
-    print("Top 10 tokens:", token_outputs(top_token_ids, token_counts, tokenizer))
 
     capture_results = Capture(
         model_id=MODEL_ID,
