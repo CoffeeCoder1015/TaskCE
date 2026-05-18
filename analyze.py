@@ -1,7 +1,6 @@
 import gc
 import os
 
-from cv2 import Formatter_FMT_DEFAULT
 from datasets import load_dataset
 import pandas as pd
 from feature.search import search_all
@@ -9,11 +8,7 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from feature import (
-    count_model_token_ids,
-    top_token_counts,
-)
-from feature.construct import ConstructFeatures, construct_label_vocab_matrices, construct_vectors
+from feature.construct import ConstructFeatures
 from capture import Capture, CaptureConfig
 from capture.postprocessing import prune_min_acts, threshold
 
@@ -30,7 +25,7 @@ CLASS_TOKEN_IDS = {
 CLASS_NAMES = ["entailment", "neutral", "contradiction"]
 
 
-def format_snli_text(example):
+def select_snli_feature_text(example):
     return {"premise": example["premise"], "hypothesis": example["hypothesis"]}
 
 
@@ -143,13 +138,10 @@ if __name__ == "__main__":
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
     log_class_token_decodes(tokenizer)
 
-    formatted_dataset = dataset.map(
-        format_snli_text,
-        remove_columns=dataset.column_names,
-    )
     feature_vectors = ConstructFeatures(
-        formatted_dataset,
-        tokenizer
+        dataset,
+        tokenizer,
+        feature_text_selector=select_snli_feature_text,
     )
 
     capture_results = Capture(

@@ -7,21 +7,26 @@ from feature.formula import Leaf
 from sympy import Symbol
 
 
-def construct_label_vocab_matrices(dataset, tokenizer, formatter=None, batch_size=256):
-    formatted_dataset = (
-        dataset.map(formatter, remove_columns=dataset.column_names)
-        if formatter is not None
+def construct_label_vocab_matrices(
+    dataset,
+    tokenizer,
+    feature_text_selector=None,
+    batch_size=256,
+):
+    feature_dataset = (
+        dataset.map(feature_text_selector, remove_columns=dataset.column_names)
+        if feature_text_selector is not None
         else dataset
     )
     vocab_size = len(tokenizer) 
     matrices = {}
 
-    for label in formatted_dataset.column_names:
+    for label in feature_dataset.column_names:
         # construct binary vectors for each label (premise, hypothesis, etc)
         rows = []
         cols = []
 
-        for row_start, batch in batched_with_start(formatted_dataset[label], batch_size):
+        for row_start, batch in batched_with_start(feature_dataset[label], batch_size):
             encoded = tokenizer(
                 batch,
                 add_special_tokens=False,
@@ -36,7 +41,7 @@ def construct_label_vocab_matrices(dataset, tokenizer, formatter=None, batch_siz
         data = np.ones(len(rows), dtype=np.int8)
         matrices[label] = csr_matrix(
             (data, (rows, cols)),
-            shape=(len(formatted_dataset), vocab_size),
+            shape=(len(feature_dataset), vocab_size),
             dtype=np.int8,
         )
 
@@ -78,19 +83,25 @@ def ConstructFeatures(
     dataset,
     tokenizer,
     batch_size=512,
-    top_k=200
+    top_k=200,
+    feature_text_selector=None,
 ):
+    feature_dataset = (
+        dataset.map(feature_text_selector, remove_columns=dataset.column_names)
+        if feature_text_selector is not None
+        else dataset
+    )
     token_counts = count_model_token_ids(
-        dataset=dataset,
+        dataset=feature_dataset,
         tokenizer=tokenizer,
         batch_size=batch_size
     )
     top_token_ids = top_token_counts(token_counts, tokenizer, top_k=top_k)
 
     label_vocab_matrices = construct_label_vocab_matrices(
-        dataset,
+        feature_dataset,
         tokenizer,
-        batch_size=512,
+        batch_size=batch_size,
     )
     feature_vectors = construct_vectors(
         label_vocab_matrices,
