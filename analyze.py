@@ -2,12 +2,12 @@ import gc
 import os
 
 from datasets import load_dataset
-import pandas as pd
 from feature.search import search_all
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
+from analysis import build_neuron_search_results_dataframe, save_neuron_search_results_csv
 from feature.construct import ConstructFeatures
 from capture import Capture, CaptureConfig
 from capture.postprocessing import prune_min_acts, threshold
@@ -114,24 +114,6 @@ def get_classification_weights(model):
     return weights
 
 
-def class_weight_record(classification_weights, neuron_id):
-    weight_ent, weight_neut, weight_contr = classification_weights[neuron_id].tolist()
-    return {
-        "weight_ent": float(weight_ent),
-        "weight_neut": float(weight_neut),
-        "weight_contr": float(weight_contr),
-    }
-
-
-def search_result_record(neuron_id, formula, iou, classification_weights):
-    return {
-        "neuron": neuron_id,
-        "formula": formula,
-        "iou": float(iou),
-        **class_weight_record(classification_weights, neuron_id),
-    }
-
-
 if __name__ == "__main__":
     os.makedirs(RESULT_DIR, exist_ok=True)
     dataset = load_dataset("snli", split="validation", trust_remote_code=True)
@@ -189,43 +171,16 @@ if __name__ == "__main__":
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
 
-    records = []
-
-    for result in search_results:
-        neuron_id = int(fine_neuron_ids[result.activation_index])
-        records.append(
-            search_result_record(
-                neuron_id,
-                result.best_formula,
-                result.best_score,
-                classification_weights,
-            )
-        )
-
-    kept_neuron_ids = set(fine_neuron_ids.tolist())
-    for neuron_id in range(int(fine_binary_acts.shape[1])):
-        if neuron_id in kept_neuron_ids:
-            continue
-        records.append(
-            search_result_record(
-                neuron_id,
-                "LOW_ACTS_PRUNED",
-                0.0,
-                classification_weights,
-            )
-        )
-
-    beam_df = pd.DataFrame(
-        records,
-        columns=[
-            "neuron",
-            "formula",
-            "iou",
-            "weight_ent",
-            "weight_neut",
-            "weight_contr",
-        ],
-    ).sort_values("iou", ascending=False, ignore_index=True)
+    beam_df = build_neuron_search_results_dataframe(
+        search_results=search_results,
+        kept_neuron_ids=fine_neuron_ids,
+        total_neuron_count=fine_binary_acts.shape[1],
+        classification_weights=classification_weights,
+    )
+    save_neuron_search_results_csv(
+        dataframe=beam_df,
+        output_csv_path=BEAM_RESULTS_CSV,
+    )
 
     print("\nSearch result dataframe stats:")
     print(f"Rows: {len(beam_df)}")
@@ -235,6 +190,4 @@ if __name__ == "__main__":
     print("\nTop 10 formulas:")
     print(beam_df["formula"].value_counts().head(10).to_string())
 
-    os.makedirs(os.path.dirname(BEAM_RESULTS_CSV), exist_ok=True)
-    beam_df.to_csv(BEAM_RESULTS_CSV, index=False)
     print(f"Saved search result dataframe: {BEAM_RESULTS_CSV}")

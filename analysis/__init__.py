@@ -6,3 +6,13 @@ ablation pipeline for CompExp results, aggregate reporting, follow-up research
 angles, and other experiment interpretation utilities that should stay separate
 from data capture and feature construction.
 """
+
+from analysis.saving import (
+    build_neuron_search_results_dataframe,
+    save_neuron_search_results_csv,
+)
+
+__all__ = [
+    "build_neuron_search_results_dataframe",
+    "save_neuron_search_results_csv",
+]
