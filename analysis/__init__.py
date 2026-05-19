@@ -11,8 +11,26 @@ from analysis.saving import (
     build_neuron_search_results_dataframe,
     save_neuron_search_results_csv,
 )
+from analysis.ablation import (
+    AblationRunConfig,
+    AblationRunResult,
+    plot_ablation_results,
+    run_ablation,
+)
+from analysis.ablation_analysis import (
+    AblationAnalysisConfig,
+    AblationAnalysisResult,
+    run_ablation_analysis,
+)
 
 __all__ = [
+    "AblationAnalysisConfig",
+    "AblationAnalysisResult",
+    "AblationRunConfig",
+    "AblationRunResult",
     "build_neuron_search_results_dataframe",
+    "plot_ablation_results",
+    "run_ablation",
+    "run_ablation_analysis",
     "save_neuron_search_results_csv",
 ]
