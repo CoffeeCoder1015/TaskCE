@@ -91,3 +91,36 @@ def test_save_neuron_search_results_csv_creates_parent_directory_and_writes_expe
         "weight_contr",
     ]
     assert loaded_dataframe.to_dict("records") == saved_dataframe.to_dict("records")
+
+
+def test_build_neuron_search_results_dataframe_accepts_dataset_weight_columns():
+    dataframe = build_neuron_search_results_dataframe(
+        search_results=[],
+        kept_neuron_ids=[],
+        total_neuron_count=1,
+        classification_weights=[[1.0, 2.0, 3.0]],
+        weight_column_names=[
+            "weight_supports",
+            "weight_refutes",
+            "weight_not_enough_info",
+        ],
+    )
+
+    assert list(dataframe.columns) == [
+        "neuron",
+        "formula",
+        "iou",
+        "weight_supports",
+        "weight_refutes",
+        "weight_not_enough_info",
+    ]
+    assert dataframe.to_dict("records") == [
+        {
+            "neuron": 0,
+            "formula": "LOW_ACTS_PRUNED",
+            "iou": 0.0,
+            "weight_supports": 1.0,
+            "weight_refutes": 2.0,
+            "weight_not_enough_info": 3.0,
+        }
+    ]

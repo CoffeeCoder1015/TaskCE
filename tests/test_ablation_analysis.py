@@ -85,3 +85,34 @@ def test_run_ablation_analysis_requires_expected_columns(tmp_path):
         "weight_neut",
         "weight_contr",
     ]
+
+
+def test_run_ablation_analysis_accepts_dataset_weight_columns(tmp_path):
+    result_csv = tmp_path / "vitaminc_search.csv"
+    pd.DataFrame(
+        [
+            {
+                "neuron": 1,
+                "formula": "tok:A",
+                "iou": 0.5,
+                "weight_supports": 1.0,
+                "weight_refutes": -3.0,
+                "weight_not_enough_info": 0.5,
+            }
+        ]
+    ).to_csv(result_csv, index=False)
+
+    result = run_ablation_analysis(
+        result_csv,
+        output_dir=tmp_path,
+        weight_column_names=[
+            "weight_supports",
+            "weight_refutes",
+            "weight_not_enough_info",
+        ],
+    )
+
+    assert result.good_neurons["neuron"].tolist() == [1]
+    report = (tmp_path / "ablation_analysis_report.txt").read_text()
+    assert "refutes" in report
+    assert "not_enough_info" in report
