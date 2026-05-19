@@ -67,12 +67,13 @@ def eval_task(model_id, tokenizer, task, lora_path=None, batch_size=128):
     ]
 
     stats = Counter(results)
-    print_results(task.name, stats)
 
     del tg_pipeline, model
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+    return stats
 
 
 def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
@@ -84,7 +85,8 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
 
     print("[Base model evaluation]")
     for task in tasks:
-        eval_task(model_id, tokenizer, task)
+        stats = eval_task(model_id, tokenizer, task)
+        print_results(task.name, stats)
 
     print("[Finetuned model evaluation]")
     task_paths = {
@@ -110,4 +112,5 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
             print(f"Skipping {task.name}: no LoRA checkpoint found.")
             continue
 
-        eval_task(model_id, tokenizer, task, lora_path=latest_checkpoints[task.name])
+        stats = eval_task(model_id, tokenizer, task, lora_path=latest_checkpoints[task.name])
+        print_results(task.name,stats)
