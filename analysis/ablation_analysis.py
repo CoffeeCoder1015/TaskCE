@@ -33,8 +33,15 @@ class AblationAnalysisResult:
     iou_ranked_neurons: pd.DataFrame
 
 
-def run_ablation_analysis(result_csv_path, output_dir=None, config=None):
+def run_ablation_analysis(
+    result_csv_path,
+    output_dir=None,
+    config=None,
+    weight_column_names=None,
+):
     config = config or AblationAnalysisConfig()
+    weight_column_names = list(weight_column_names or SEARCH_RESULT_COLUMNS[3:])
+    required_columns = ["neuron", "formula", "iou", *weight_column_names]
     result_csv_path = Path(result_csv_path)
     output_dir = Path(output_dir) if output_dir is not None else result_csv_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -42,11 +49,11 @@ def run_ablation_analysis(result_csv_path, output_dir=None, config=None):
     # Stage 1: load the search result CSV produced after feature search.
     search_results = pd.read_csv(result_csv_path)
     missing_columns = [
-        column for column in SEARCH_RESULT_COLUMNS if column not in search_results.columns
+        column for column in required_columns if column not in search_results.columns
     ]
     if missing_columns:
         raise ValueError(f"search result CSV missing required columns: {missing_columns}")
-    search_results = search_results[SEARCH_RESULT_COLUMNS].copy()
+    search_results = search_results[required_columns].copy()
 
     # Stage 2: split the search rows into the ranked groups used by ablation.
     garbage_formulas = set(config.garbage_formulas)
@@ -120,31 +127,22 @@ def run_ablation_analysis(result_csv_path, output_dir=None, config=None):
 
     # Stage 5: build weight contribution analysis by class.
     weight_contributions = search_results.copy()
-    weight_contributions["total_weight"] = (
-        weight_contributions["weight_ent"].abs()
-        + weight_contributions["weight_neut"].abs()
-        + weight_contributions["weight_contr"].abs()
+    weight_contributions["total_weight"] = sum(
+        weight_contributions[column].abs() for column in weight_column_names
     )
     weight_contributions["pct_total"] = (
         weight_contributions["total_weight"].rank(pct=True) * 100
     )
-    weight_contributions["pct_ent"] = (
-        weight_contributions["weight_ent"].rank(pct=True) * 100
-    )
-    weight_contributions["pct_neut"] = (
-        weight_contributions["weight_neut"].rank(pct=True) * 100
-    )
-    weight_contributions["pct_contr"] = (
-        weight_contributions["weight_contr"].rank(pct=True) * 100
-    )
-    dominant_columns = ["weight_ent", "weight_neut", "weight_contr"]
+    for column in weight_column_names:
+        weight_contributions[f"pct_{column.removeprefix('weight_')}"] = (
+            weight_contributions[column].rank(pct=True) * 100
+        )
     dominant_names = {
-        "weight_ent": "entailment",
-        "weight_neut": "neutral",
-        "weight_contr": "contradiction",
+        column: column.removeprefix("weight_")
+        for column in weight_column_names
     }
     weight_contributions["dominant_class"] = (
-        weight_contributions[dominant_columns].abs().idxmax(axis=1).map(dominant_names)
+        weight_contributions[weight_column_names].abs().idxmax(axis=1).map(dominant_names)
     )
     weight_contributions = weight_contributions.sort_values(
         "total_weight",
@@ -185,9 +183,7 @@ def run_ablation_analysis(result_csv_path, output_dir=None, config=None):
                 "neuron",
                 "formula",
                 "iou",
-                "weight_ent",
-                "weight_neut",
-                "weight_contr",
+                *weight_column_names,
                 "total_weight",
                 "dominant_class",
             ]

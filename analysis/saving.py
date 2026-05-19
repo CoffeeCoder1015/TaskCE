@@ -19,7 +19,9 @@ def build_neuron_search_results_dataframe(
     kept_neuron_ids,
     total_neuron_count,
     classification_weights,
+    weight_column_names=None,
 ):
+    weight_column_names = list(weight_column_names or NEURON_SEARCH_RESULT_COLUMNS[3:])
     kept_neuron_ids = neuron_id_list(kept_neuron_ids)
     kept_neuron_id_set = set(kept_neuron_ids)
 
@@ -32,6 +34,7 @@ def build_neuron_search_results_dataframe(
                 formula=result.best_formula,
                 iou=result.best_score,
                 classification_weights=classification_weights,
+                weight_column_names=weight_column_names,
             )
         )
 
@@ -44,12 +47,13 @@ def build_neuron_search_results_dataframe(
                 formula=PRUNED_NEURON_FORMULA,
                 iou=0.0,
                 classification_weights=classification_weights,
+                weight_column_names=weight_column_names,
             )
         )
 
     return pd.DataFrame(
         records,
-        columns=NEURON_SEARCH_RESULT_COLUMNS,
+        columns=["neuron", "formula", "iou", *weight_column_names],
     ).sort_values("iou", ascending=False, ignore_index=True)
 
 
@@ -60,20 +64,35 @@ def save_neuron_search_results_csv(dataframe, output_csv_path):
     return dataframe
 
 
-def neuron_search_result_record(neuron_id, formula, iou, classification_weights):
+def neuron_search_result_record(
+    neuron_id,
+    formula,
+    iou,
+    classification_weights,
+    weight_column_names=None,
+):
+    weight_column_names = list(weight_column_names or NEURON_SEARCH_RESULT_COLUMNS[3:])
     weights = classification_weights[int(neuron_id)]
     if hasattr(weights, "tolist"):
         weights = weights.tolist()
-    weight_ent, weight_neut, weight_contr = weights
+    if len(weights) != len(weight_column_names):
+        raise ValueError(
+            "classification weight count does not match weight column count: "
+            f"{len(weights)} != {len(weight_column_names)}"
+        )
 
-    return {
+    record = {
         "neuron": int(neuron_id),
         "formula": formula,
         "iou": float(iou),
-        "weight_ent": float(weight_ent),
-        "weight_neut": float(weight_neut),
-        "weight_contr": float(weight_contr),
     }
+    record.update(
+        {
+            column_name: float(weight)
+            for column_name, weight in zip(weight_column_names, weights, strict=True)
+        }
+    )
+    return record
 
 
 def neuron_id_list(neuron_ids):
