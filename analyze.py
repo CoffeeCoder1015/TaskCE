@@ -202,6 +202,7 @@ if __name__ == "__main__":
         model_id=MODEL_ID,
         task=snli_task,
         layer=-2,
+        class_token_ids=CLASS_TOKEN_IDS,
         lora_path=lora_path,
     )
 
