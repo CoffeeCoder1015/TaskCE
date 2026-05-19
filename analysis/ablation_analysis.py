@@ -121,9 +121,9 @@ def run_ablation_analysis(result_csv_path, output_dir=None, config=None):
     # Stage 5: build weight contribution analysis by class.
     weight_contributions = search_results.copy()
     weight_contributions["total_weight"] = (
-        weight_contributions["weight_ent"]
-        + weight_contributions["weight_neut"]
-        + weight_contributions["weight_contr"]
+        weight_contributions["weight_ent"].abs()
+        + weight_contributions["weight_neut"].abs()
+        + weight_contributions["weight_contr"].abs()
     )
     weight_contributions["pct_total"] = (
         weight_contributions["total_weight"].rank(pct=True) * 100

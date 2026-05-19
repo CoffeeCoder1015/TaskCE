@@ -34,6 +34,14 @@ def write_search_csv(path):
                 "weight_neut": 0.5,
                 "weight_contr": 0.1,
             },
+            {
+                "neuron": 13,
+                "formula": "tok:C",
+                "iou": 0.2,
+                "weight_ent": 5.0,
+                "weight_neut": -5.0,
+                "weight_contr": 0.0,
+            },
         ]
     ).to_csv(path, index=False)
 
@@ -44,9 +52,9 @@ def test_run_ablation_analysis_writes_reports_and_ranked_groups(tmp_path):
 
     result = run_ablation_analysis(result_csv, output_dir=tmp_path)
 
-    assert result.good_neurons["neuron"].tolist() == [10]
+    assert result.good_neurons["neuron"].tolist() == [10, 13]
     assert result.bad_neurons["neuron"].tolist() == [12, 11]
-    assert result.iou_ranked_neurons["neuron"].tolist() == [10, 12, 11]
+    assert result.iou_ranked_neurons["neuron"].tolist() == [10, 13, 12, 11]
     assert (tmp_path / "ablation_analysis_report.txt").exists()
     assert not (tmp_path / "ablation_group_summary.csv").exists()
     assert not (tmp_path / "ablation_iou_bands.csv").exists()
@@ -57,7 +65,9 @@ def test_run_ablation_analysis_writes_reports_and_ranked_groups(tmp_path):
     assert "GROUP SUMMARY" in report
     assert "IOU BAND BOUNDARIES" in report
     assert "entailment" in report
-    assert "0.7" in report
+    assert "10.0" in report
+    weight_report = report.split("TOP WEIGHT CONTRIBUTIONS", 1)[1]
+    assert weight_report.find("tok:C") < weight_report.find("tok:B")
 
 
 def test_run_ablation_analysis_requires_expected_columns(tmp_path):
