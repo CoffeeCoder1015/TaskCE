@@ -48,34 +48,6 @@ def format_snli_for_capture(example):
     return example
 
 
-def token_outputs(token_ids, counts, tokenizer, limit=10):
-    tokens = [tokenizer.decode([token_id]) for token_id in token_ids[:limit]]
-    return [
-        (token, int(counts[token_id]))
-        for token, token_id in zip(tokens, token_ids[:limit])
-    ]
-
-
-def summarize_postprocessing(binary_acts, pruned_acts, neuron_ids):
-    return {
-        "binary_shape": tuple(binary_acts.shape),
-        "pruned_shape": tuple(pruned_acts.shape),
-        "kept_neuron_count": int(neuron_ids.numel()),
-        "kept_neuron_preview": neuron_ids[:20].tolist(),
-    }
-
-
-def log_class_token_decodes(tokenizer):
-    decoded = {}
-    print("Target NLI class token ids:")
-    for label in CLASS_NAMES:
-        token_id = CLASS_TOKEN_IDS[label]
-        token = tokenizer.decode([token_id])
-        decoded[label] = token
-        print(f"  {label} token_id={token_id} decoded={token!r}")
-    return decoded
-
-
 def resolve_latest_lora_checkpoint(lora_dir, task_name):
     task_dir = os.path.join(lora_dir, task_name)
     if not os.path.isdir(task_dir):
@@ -118,7 +90,6 @@ if __name__ == "__main__":
     os.makedirs(RESULT_DIR, exist_ok=True)
     dataset = load_dataset("snli", split="validation", trust_remote_code=True)
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    log_class_token_decodes(tokenizer)
 
     feature_vectors = ConstructFeatures(
         dataset,
@@ -151,15 +122,6 @@ if __name__ == "__main__":
     fine_binary_acts = threshold(activations_fine.states, alpha=alpha)
     fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
 
-    print(
-        "Base postprocessing:",
-        summarize_postprocessing(base_binary_acts, base_pruned_acts, base_neuron_ids),
-    )
-    print(
-        "Finetuned postprocessing:",
-        summarize_postprocessing(fine_binary_acts, fine_pruned_acts, fine_neuron_ids),
-    )
-
     search_results = search_all(fine_pruned_acts, feature_vectors, num_workers=16)
     lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
     lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
@@ -181,13 +143,5 @@ if __name__ == "__main__":
         dataframe=beam_df,
         output_csv_path=BEAM_RESULTS_CSV,
     )
-
-    print("\nSearch result dataframe stats:")
-    print(f"Rows: {len(beam_df)}")
-    print(f"Columns: {list(beam_df.columns)}")
-    print("\nNumeric summary:")
-    print(beam_df.describe(include="number").to_string())
-    print("\nTop 10 formulas:")
-    print(beam_df["formula"].value_counts().head(10).to_string())
 
     print(f"Saved search result dataframe: {BEAM_RESULTS_CSV}")
