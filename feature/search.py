@@ -139,11 +139,9 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
             current_iou = abs(rank_heuristic)
             current_score = current_iou * length_penalty_factor(formula, penalty)
             if current_score > best_score:
-                print("score:", current_score, logic_str(formula))
                 best_formula = logic_str(formula)
                 best_score = current_score
             if current_iou > best_iou:
-                print("iou:", current_iou, logic_str(formula))
                 best_iou = current_iou
 
             length = formula.count(Symbol)
@@ -214,11 +212,9 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
         current_iou = abs(rank_heuristic)
         current_score = current_iou * length_penalty_factor(formula, penalty)
         if current_score > best_score:
-            print("score:", current_score, logic_str(formula))
             best_formula = logic_str(formula)
             best_score = current_score
         if current_iou > best_iou:
-            print("iou:", current_iou, logic_str(formula))
             best_iou = current_iou
 
         length = formula.count(Symbol)
@@ -281,12 +277,14 @@ def search_worker(activation_vectors,activation_indicies:list[int],feature_vecto
     results = []
     
     for local_activation_index, global_activation_index in enumerate(activation_indicies):
-        print(f"Running LevelSearch for global index {global_activation_index}")
-        best_formula, best_score = LevelSearch(
+        search_func = Search
+        print(f"Running {search_func.__name__} for global index {global_activation_index}")
+        best_formula, best_score = search_func(
             activation_vectors[:,local_activation_index],
             feature_vectors,
             config,
         )
+        print(f"{best_score}: {best_formula}")
         results.append(
             SearchResult(
                 activation_index=global_activation_index,
