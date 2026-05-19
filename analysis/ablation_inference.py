@@ -4,7 +4,8 @@ import gc
 from peft import PeftModel
 import torch
 from tqdm import tqdm
-from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
+from transformers import AutoModelForCausalLM, AutoTokenizer
+
 
 def make_ablation_hook(neuron_ids):
     def ablation_hook(module, inputs, output):
@@ -20,6 +21,7 @@ class AblationInferenceEngine:
         model_id,
         task,
         layer,
+        class_token_ids,
         lora_path=None,
         batch_size=128,
         dtype=torch.bfloat16,
@@ -28,6 +30,8 @@ class AblationInferenceEngine:
         self.task = task
         self.layer = layer
         self.batch_size = batch_size
+        self.class_names = list(class_token_ids)
+        self.class_ids_list = [class_token_ids[label] for label in self.class_names]
         self.tokenizer = AutoTokenizer.from_pretrained(model_id)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -41,11 +45,6 @@ class AblationInferenceEngine:
         if lora_path is not None:
             self.model = PeftModel.from_pretrained(self.model, lora_path)
         self.model.eval()
-        self.text_generation = pipeline(
-            "text-generation",
-            model=self.model,
-            tokenizer=self.tokenizer,
-        )
         named_layers = [(name, module) for name, module in self.model.named_modules() if name]
         if isinstance(layer, str):
             self.ablation_layer = dict(named_layers)[layer]
@@ -71,20 +70,24 @@ class AblationInferenceEngine:
                 leave=False,
             ):
                 batch = self.prompts[index:index + self.batch_size]
-                out = self.text_generation(
+                tokenized = self.tokenizer.apply_chat_template(
                     batch,
-                    batch_size=self.batch_size,
-                    return_full_text=False,
-                )
-                responses_raw.extend(out)
+                    add_generation_prompt=True,
+                    padding=True,
+                    return_dict=True,
+                    return_tensors="pt",
+                ).to(self.model.device)
+                with torch.inference_mode():
+                    out = self.model(**tokenized)
+                class_logits = out.logits[:, -1, self.class_ids_list]
+                predictions = class_logits.argmax(dim=1).tolist()
+                responses_raw.extend(self.class_names[prediction] for prediction in predictions)
         finally:
             if hook_handle is not None:
                 hook_handle.remove()
 
-        response_chats = [response[0]["generated_text"] for response in responses_raw]
-        predictions = [self.task.eval_fn(response_chat) for response_chat in response_chats]
         results = []
-        for prediction, answer in zip(predictions, self.answers):
+        for prediction, answer in zip(responses_raw, self.answers):
             if prediction is None:
                 results.append("reject")
             elif prediction == answer:
@@ -94,7 +97,7 @@ class AblationInferenceEngine:
         return Counter(results)
 
     def close(self):
-        del self.text_generation, self.model
+        del self.model
         gc.collect()
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
