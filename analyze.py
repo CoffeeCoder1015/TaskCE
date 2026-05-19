@@ -2,12 +2,19 @@ import gc
 import os
 
 from datasets import load_dataset
-from feature.search import search_all
+from feature.search import searchConfig, search_all
 import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from analysis import build_neuron_search_results_dataframe, save_neuron_search_results_csv
+from analysis import (
+    build_neuron_search_results_dataframe,
+    save_neuron_search_results_csv,
+    run_ablation,
+    run_ablation_analysis,
+)
+from analysis.ablation_inference import AblationInferenceEngine
+from evaluation import EvalConfig
 from feature.construct import ConstructFeatures
 from capture import Capture, CaptureConfig
 from capture.postprocessing import prune_min_acts, threshold
@@ -16,6 +23,15 @@ MODEL_ID = "LiquidAI/LFM2.5-1.2B-Thinking"
 LORA_DIR = "../multitune/output"
 RESULT_DIR = "results"
 BEAM_RESULTS_CSV = os.path.join(RESULT_DIR, "snli_beam_results.csv")
+ACTIVATION_ALPHA = 0.055
+MIN_ACTS = 500
+SEARCH_NUM_WORKERS = 10
+SEARCH_CONFIG = searchConfig(
+    formula_length=5,
+    pruned_queue_size=10,
+    max_iterations=10,
+    length_penalty=0.0,
+)
 
 CLASS_TOKEN_IDS = {
     "entailment": 806,
@@ -116,13 +132,21 @@ if __name__ == "__main__":
     print(activations_base)
     print(activations_fine)
 
-    alpha = 0.055
-    base_binary_acts = threshold(activations_base.states, alpha=alpha)
-    base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts)
-    fine_binary_acts = threshold(activations_fine.states, alpha=alpha)
-    fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts)
+    base_binary_acts = threshold(activations_base.states, alpha=ACTIVATION_ALPHA)
+    base_pruned_acts, base_neuron_ids = prune_min_acts(base_binary_acts, min_acts=MIN_ACTS)
+    fine_binary_acts = threshold(activations_fine.states, alpha=ACTIVATION_ALPHA)
+    fine_pruned_acts, fine_neuron_ids = prune_min_acts(fine_binary_acts, min_acts=MIN_ACTS)
 
-    search_results = search_all(fine_pruned_acts, feature_vectors, num_workers=16)
+    print(f"Activation alpha: {ACTIVATION_ALPHA}")
+    print(f"Minimum activations: {MIN_ACTS}")
+    print(f"Search workers: {SEARCH_NUM_WORKERS}")
+    print(f"Search config: {SEARCH_CONFIG}")
+    search_results = search_all(
+        fine_pruned_acts,
+        feature_vectors,
+        num_workers=SEARCH_NUM_WORKERS,
+        config=SEARCH_CONFIG,
+    )
     lora_path = resolve_latest_lora_checkpoint(LORA_DIR, "snli")
     lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
     try:
@@ -145,3 +169,48 @@ if __name__ == "__main__":
     )
 
     print(f"Saved search result dataframe: {BEAM_RESULTS_CSV}")
+
+    # Hook up the ablation pipeline
+    print("Running ablation analysis...")
+    analysis_result = run_ablation_analysis(
+        result_csv_path=BEAM_RESULTS_CSV,
+        output_dir=RESULT_DIR,
+    )
+
+    def extract_first_class(content, classes):
+        content = content.lower()
+        classifications = {label: content.find(label) for label in classes}
+
+        return min(
+            filter(lambda x: x[1] >= 0, classifications.items()),
+            key=lambda kv: kv[1],
+            default=(None, None),
+        )[0]
+
+    def extract_snli(content):
+        return extract_first_class(content, SNLI_LABELS)
+
+    snli_task = EvalConfig(
+        name="snli",
+        dataset=dataset,
+        data_formatter=format_snli_for_capture,
+        eval_fn=extract_snli,
+    )
+
+    print("Building ablation inference engine...")
+    inference_engine = AblationInferenceEngine(
+        model_id=MODEL_ID,
+        task=snli_task,
+        layer=-2,
+        lora_path=lora_path,
+    )
+
+    print("Running ablation...")
+    try:
+        run_ablation(
+            analysis_result=analysis_result,
+            inference_engine=inference_engine,
+            output_dir=RESULT_DIR,
+        )
+    finally:
+        inference_engine.close()
