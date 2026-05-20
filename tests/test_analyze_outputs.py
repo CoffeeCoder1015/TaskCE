@@ -6,6 +6,7 @@ from analyze import (
     get_classification_weights,
     selected_targets,
     stage_task_message,
+    targets_by_batch_size,
 )
 
 
@@ -36,6 +37,7 @@ def test_vitaminc_analysis_target_uses_expected_labels_and_token_ids():
     assert target.dataset_name == "tals/vitaminc"
     assert target.split == "validation[:10_000]"
     assert target.capture_name == "claim"
+    assert target.batch_size == 64
     assert target.labels == ("supports", "refutes", "not enough info")
     assert target.class_token_ids == {
         "supports": 56744,
@@ -89,3 +91,12 @@ def test_build_capture_configs_uses_capture_names_and_shared_datasets():
     assert [config.name for config in configs] == ["snli", "claim"]
     assert configs[0].dataset is datasets["snli"]
     assert configs[1].dataset is datasets["claim"]
+
+
+def test_targets_by_batch_size_groups_targets_for_capture_calls():
+    grouped_targets = targets_by_batch_size(
+        [ANALYSIS_TARGETS["snli"], ANALYSIS_TARGETS["claim"]]
+    )
+
+    assert grouped_targets[256] == [ANALYSIS_TARGETS["snli"]]
+    assert grouped_targets[64] == [ANALYSIS_TARGETS["claim"]]
