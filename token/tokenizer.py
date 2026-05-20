@@ -1,11 +1,11 @@
 from datasets import load_dataset
-from huggingface_hub import split_tf_state_dict_into_shards
 from corpus import build_corpus_from_dataset
 from tokenizers import NormalizedString, PreTokenizedString, Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers import pre_tokenizers
 from tokenizers.trainers import WordLevelTrainer
 from tokenizers.normalizers import Lowercase
+from transformers import PreTrainedTokenizerFast
 import spacy
 
 
@@ -35,28 +35,42 @@ class SpacyPretokenizer:
         pretok.split(self.spacy_split)
 
 
-tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
-tokenizer.normalizer = Lowercase()
-tokenizer.pre_tokenizer = pre_tokenizers.PreTokenizer.custom(SpacyPretokenizer(True))
-print(tokenizer.pre_tokenizer.pre_tokenize_str("Hello world"))
-
-trainer = WordLevelTrainer(
-    special_tokens=["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]"],
-)
+def build_tokenizer():
+    tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
+    tokenizer.normalizer = Lowercase()
+    tokenizer.pre_tokenizer = pre_tokenizers.PreTokenizer.custom(SpacyPretokenizer(True))
+    return tokenizer
 
 
-def to_text(example):
-    test_example = f"Premise: {example['premise']}\nHypothesis: {example['hypothesis']}"
-    example["text"] = test_example
-    return example
+if __name__ == "__main__":
+    # Demo: train the spaCy-backed tokenizer on a tiny formatted SNLI slice.
+    demo_tokenizer = build_tokenizer()
+    print(demo_tokenizer.pre_tokenizer.pre_tokenize_str("Hello world"))
 
+    demo_trainer = WordLevelTrainer(
+        special_tokens=["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]"],
+    )
 
-snli = load_dataset("snli", split="validation[:100]")
-snli = snli.map(to_text)
+    def demo_to_text(example):
+        demo_text = f"Premise: {example['premise']}\nHypothesis: {example['hypothesis']}"
+        example["text"] = demo_text
+        return example
 
-train_data = build_corpus_from_dataset(snli)
-tokenizer.train_from_iterator(train_data, trainer=trainer)
+    demo_dataset = load_dataset("snli", split="validation[:100]")
+    demo_dataset = demo_dataset.map(demo_to_text)
 
-encoding = tokenizer.encode("a man is walking")
-print(encoding.tokens)
-print(encoding.ids)
+    demo_train_data = build_corpus_from_dataset(demo_dataset)
+    demo_tokenizer.train_from_iterator(demo_train_data, trainer=demo_trainer)
+
+    demo_hf_tokenizer = PreTrainedTokenizerFast(
+        tokenizer_object=demo_tokenizer,
+        unk_token="[UNK]",
+        pad_token="[PAD]",
+        cls_token="[CLS]",
+        sep_token="[SEP]",
+        mask_token="[MASK]",
+    )
+
+    demo_encoded = demo_hf_tokenizer("a man is walking", add_special_tokens=False)
+    print(demo_hf_tokenizer.tokenize("a man is walking"))
+    print(demo_encoded["input_ids"])
