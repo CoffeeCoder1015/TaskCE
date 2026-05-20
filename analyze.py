@@ -131,15 +131,14 @@ ANALYSIS_TARGETS = {
         feature_text_selector=select_snli_feature_text,
         data_formatter=format_snli_for_capture,
     ),
-    "vitaminc": AnalysisTarget(
-        name="vitaminc",
+    "claim": AnalysisTarget(
+        name="claim",
         dataset_name="tals/vitaminc",
         split="validation[:10_000]",
         labels=VITAMINC_LABELS,
         class_token_ids=VITAMINC_CLASS_TOKEN_IDS,
         feature_text_selector=select_vitaminc_feature_text,
         data_formatter=format_vitaminc_for_capture,
-        model_task_name="claim",
     ),
 }
 
@@ -194,34 +193,149 @@ def extract_first_class(content, classes):
     )[0]
 
 
-def run_analysis_target(target):
-    os.makedirs(target.output_dir, exist_ok=True)
-    dataset = load_dataset(
-        target.dataset_name,
-        split=target.split,
-        trust_remote_code=True,
-    )
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+def log_stage_task(stage, target):
+    print( f"[{stage}] is operating on task {target.name}" )
 
-    feature_vectors = ConstructFeatures(
+def selected_targets(target_name):
+    if target_name == "all":
+        return list(ANALYSIS_TARGETS.values())
+    return [ANALYSIS_TARGETS[target_name]]
+
+def load_target_datasets(targets):
+    datasets = {}
+    for target in targets:
+        log_stage_task("dataset loading", target)
+        datasets[target.name] = load_dataset(
+            target.dataset_name,
+            split=target.split,
+            trust_remote_code=True,
+        )
+    return datasets
+
+
+def build_feature_vectors_for_target(target, dataset, tokenizer):
+    log_stage_task("feature construction", target)
+    return ConstructFeatures(
         dataset,
         tokenizer,
         feature_text_selector=target.feature_text_selector,
     )
 
-    capture_results = Capture(
+
+def build_feature_vectors_by_target(targets, datasets, tokenizer):
+    return {
+        target.name: build_feature_vectors_for_target(
+            target,
+            datasets[target.name],
+            tokenizer,
+        )
+        for target in targets
+    }
+
+
+def build_capture_configs(targets, datasets):
+    return [
+        CaptureConfig(
+            name=target.capture_name,
+            dataset=datasets[target.name],
+            data_formatter=target.data_formatter,
+        )
+        for target in targets
+    ]
+
+
+def capture_analysis_targets(targets, datasets):
+    for target in targets:
+        log_stage_task("capture", target)
+    return Capture(
         model_id=MODEL_ID,
         lora_dir=LORA_DIR,
-        tasks=[
-            CaptureConfig(
-                name=target.capture_name,
-                dataset=dataset,
-                data_formatter=target.data_formatter,
-            )
-        ],
+        tasks=build_capture_configs(targets, datasets),
         layer=-2,
         batch_size=256,
     )
+
+
+def load_classification_weights_for_target(target):
+    log_stage_task("classification weight loading", target)
+    lora_path = resolve_latest_lora_checkpoint(LORA_DIR, target.capture_name)
+    lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
+    try:
+        classification_weights = get_classification_weights(
+            lm_head_model,
+            class_token_ids=target.class_token_ids,
+        )
+    finally:
+        del lm_head_model
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    return classification_weights, lora_path
+
+
+def save_target_search_results(target, search_results, fine_binary_acts, fine_neuron_ids):
+    log_stage_task("search result saving", target)
+    classification_weights, lora_path = load_classification_weights_for_target(target)
+    beam_df = build_neuron_search_results_dataframe(
+        search_results=search_results,
+        kept_neuron_ids=fine_neuron_ids,
+        total_neuron_count=fine_binary_acts.shape[1],
+        classification_weights=classification_weights,
+        weight_column_names=target.weight_column_names,
+    )
+    save_neuron_search_results_csv(
+        dataframe=beam_df,
+        output_csv_path=target.beam_results_csv,
+    )
+    print(f"Saved search result dataframe: {target.beam_results_csv}")
+    return lora_path
+
+
+def run_target_ablation(target, dataset, lora_path):
+    log_stage_task("ablation analysis", target)
+    print("Running ablation analysis...")
+    analysis_result = run_ablation_analysis(
+        result_csv_path=target.beam_results_csv,
+        output_dir=target.output_dir,
+        weight_column_names=target.weight_column_names,
+    )
+
+    task = EvalConfig(
+        name=target.capture_name,
+        dataset=dataset,
+        data_formatter=target.data_formatter,
+        eval_fn=lambda content: extract_first_class(content, target.labels),
+    )
+
+    log_stage_task("ablation inference engine", target)
+    print("Building ablation inference engine...")
+    inference_engine = AblationInferenceEngine(
+        model_id=MODEL_ID,
+        task=task,
+        layer=-2,
+        class_token_ids=target.class_token_ids,
+        lora_path=lora_path,
+    )
+
+    log_stage_task("ablation run", target)
+    print("Running ablation...")
+    try:
+        run_ablation(
+            analysis_result=analysis_result,
+            inference_engine=inference_engine,
+            output_dir=target.output_dir,
+        )
+    finally:
+        inference_engine.close()
+
+
+def run_search_and_ablation_for_target(
+    target,
+    dataset,
+    feature_vectors,
+    capture_results,
+):
+    os.makedirs(target.output_dir, exist_ok=True)
 
     activations_base = capture_results[target.capture_name]["base"]
     activations_fine = capture_results[target.capture_name]["finetuned"]
@@ -238,71 +352,39 @@ def run_analysis_target(target):
     print(f"Minimum activations: {MIN_ACTS}")
     print(f"Search workers: {SEARCH_NUM_WORKERS}")
     print(f"Search config: {SEARCH_CONFIG}")
+    log_stage_task("feature search", target)
     search_results = search_all(
         fine_pruned_acts,
         feature_vectors,
         num_workers=SEARCH_NUM_WORKERS,
         config=SEARCH_CONFIG,
     )
-    lora_path = resolve_latest_lora_checkpoint(LORA_DIR, target.capture_name)
-    lm_head_model = load_lm_head_model(MODEL_ID, lora_path=lora_path)
-    try:
-        classification_weights = get_classification_weights(
-            lm_head_model,
-            class_token_ids=target.class_token_ids,
-        )
-    finally:
-        del lm_head_model
-        gc.collect()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
-    beam_df = build_neuron_search_results_dataframe(
+    lora_path = save_target_search_results(
+        target=target,
         search_results=search_results,
-        kept_neuron_ids=fine_neuron_ids,
-        total_neuron_count=fine_binary_acts.shape[1],
-        classification_weights=classification_weights,
-        weight_column_names=target.weight_column_names,
+        fine_binary_acts=fine_binary_acts,
+        fine_neuron_ids=fine_neuron_ids,
     )
-    save_neuron_search_results_csv(
-        dataframe=beam_df,
-        output_csv_path=target.beam_results_csv,
+    run_target_ablation(target, dataset, lora_path)
+
+
+def run_analysis_targets(targets):
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+    datasets = load_target_datasets(targets)
+    feature_vectors_by_target = build_feature_vectors_by_target(
+        targets,
+        datasets,
+        tokenizer,
     )
+    capture_results = capture_analysis_targets(targets, datasets)
 
-    print(f"Saved search result dataframe: {target.beam_results_csv}")
-
-    print("Running ablation analysis...")
-    analysis_result = run_ablation_analysis(
-        result_csv_path=target.beam_results_csv,
-        output_dir=target.output_dir,
-        weight_column_names=target.weight_column_names,
-    )
-
-    task = EvalConfig(
-        name=target.capture_name,
-        dataset=dataset,
-        data_formatter=target.data_formatter,
-        eval_fn=lambda content: extract_first_class(content, target.labels),
-    )
-
-    print("Building ablation inference engine...")
-    inference_engine = AblationInferenceEngine(
-        model_id=MODEL_ID,
-        task=task,
-        layer=-2,
-        class_token_ids=target.class_token_ids,
-        lora_path=lora_path,
-    )
-
-    print("Running ablation...")
-    try:
-        run_ablation(
-            analysis_result=analysis_result,
-            inference_engine=inference_engine,
-            output_dir=target.output_dir,
+    for target in targets:
+        run_search_and_ablation_for_target(
+            target=target,
+            dataset=datasets[target.name],
+            feature_vectors=feature_vectors_by_target[target.name],
+            capture_results=capture_results,
         )
-    finally:
-        inference_engine.close()
 
 
 def parse_args():
@@ -318,13 +400,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    targets = (
-        ANALYSIS_TARGETS.values()
-        if args.target == "all"
-        else [ANALYSIS_TARGETS[args.target]]
-    )
-    for target in targets:
-        run_analysis_target(target)
+    run_analysis_targets(selected_targets(args.target))
 
 
 if __name__ == "__main__":

@@ -2,7 +2,10 @@ import torch
 
 from analyze import (
     ANALYSIS_TARGETS,
+    build_capture_configs,
     get_classification_weights,
+    selected_targets,
+    stage_task_message,
 )
 
 
@@ -27,8 +30,9 @@ def test_lm_head_weights_are_detached_and_indexed_by_class_token_ids():
 
 
 def test_vitaminc_analysis_target_uses_expected_labels_and_token_ids():
-    target = ANALYSIS_TARGETS["vitaminc"]
+    target = ANALYSIS_TARGETS["claim"]
 
+    assert target.name == "claim"
     assert target.dataset_name == "tals/vitaminc"
     assert target.split == "validation[:10_000]"
     assert target.capture_name == "claim"
@@ -52,7 +56,36 @@ def test_vitaminc_formatter_builds_prompt_and_answer_from_label_text():
         "label": "SUPPORTS",
     }
 
-    formatted = ANALYSIS_TARGETS["vitaminc"].data_formatter(example)
+    formatted = ANALYSIS_TARGETS["claim"].data_formatter(example)
 
     assert formatted["prompt"][1]["content"] == "Evidence: The evidence text.\nClaim: The claim text."
     assert formatted["answer"] == "supports"
+
+
+def test_selected_targets_returns_all_targets_in_registry_order():
+    targets = selected_targets("all")
+
+    assert [target.name for target in targets] == ["snli", "claim"]
+
+
+def test_stage_task_message_names_stage_and_task():
+    assert (
+        stage_task_message("feature construction", "claim")
+        == "[feature construction] is operating on task claim"
+    )
+
+
+def test_build_capture_configs_uses_capture_names_and_shared_datasets():
+    datasets = {
+        "snli": object(),
+        "claim": object(),
+    }
+
+    configs = build_capture_configs(
+        [ANALYSIS_TARGETS["snli"], ANALYSIS_TARGETS["claim"]],
+        datasets,
+    )
+
+    assert [config.name for config in configs] == ["snli", "claim"]
+    assert configs[0].dataset is datasets["snli"]
+    assert configs[1].dataset is datasets["claim"]
