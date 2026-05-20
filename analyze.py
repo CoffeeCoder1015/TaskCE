@@ -18,7 +18,7 @@ from capture.postprocessing import threshold, prune_min_acts
 
 from feature.construct import ConstructFeatures, identity_column_selector
 from feature.search import search_all, searchConfig
-from token import get_tokenizer
+from WordTokenizer import get_tokenizer
 
 
 SNLI_LABELS = ("entailment", "neutral", "contradiction")
