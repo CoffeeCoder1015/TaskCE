@@ -1,6 +1,12 @@
+import os
 from datasets import load_dataset
+from analysis.saving import (
+    build_neuron_search_results_dataframe,
+    save_neuron_search_results_csv,
+)
 from transformers import AutoTokenizer
 
+from capture.classification_weights import get_classification_weights
 from capture.captureConfig import CaptureConfig
 from capture.capturer import Capture
 from capture.postprocessing import threshold, prune_min_acts
@@ -93,6 +99,7 @@ if __name__ == "__main__":
         layer=-2,
     )
 
+    output_dir = "results"
     search_config = searchConfig(
         formula_length=5,
         pruned_queue_size=10,
@@ -104,13 +111,17 @@ if __name__ == "__main__":
             "name": "snli",
             "alpha": 0.53,
             "min_acts": 500,
-            "features":snli_features
+            "features": snli_features,
+            "class_token_ids": SNLI_CLASS_TOKEN_IDS,
+            "labels": SNLI_LABELS,
         },
         {
             "name": "claim",
             "alpha": 0.5,
             "min_acts": 500,
-            "features":claim_features
+            "features": claim_features,
+            "class_token_ids": VITAMINC_CLASS_TOKEN_IDS,
+            "labels": VITAMINC_LABELS,
         },
     ]
 
@@ -120,10 +131,29 @@ if __name__ == "__main__":
         min_acts = task["min_acts"]
         features = task["features"]
         activations = captured_results[name]["finetuned"]
-        _, kept_activations, kept_neurons = post_process_activations(activations , alpha, min_acts,)
-        search_all(
+        binarized_activations, kept_activations, kept_neurons = post_process_activations(
+            activations,
+            alpha,
+            min_acts,
+        )
+
+        search_results = search_all(
             kept_activations,
             features,
             num_workers=10,
             config=search_config,
         )
+
+        classification_weights = get_classification_weights( model_id, lora_dir, name, task["class_token_ids"],)
+        weight_column_names = tuple( f"weight_{label.replace(' ', '_')}" for label in task["labels"])
+
+        dataframe = build_neuron_search_results_dataframe(
+            search_results,
+            kept_neurons,
+            binarized_activations.shape[1],
+            classification_weights,
+            weight_column_names,
+        )
+
+        output_csv_path = os.path.join(output_dir, f"{name}_beam_results.csv")
+        save_neuron_search_results_csv(dataframe, output_csv_path)
