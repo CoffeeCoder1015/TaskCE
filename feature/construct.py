@@ -7,6 +7,11 @@ from feature.formula import Leaf
 from sympy import Symbol
 
 
+def identity_column_selector(columns: list[str]):
+    """Return a dataset row mapper that keeps only the requested columns."""
+    return lambda example: {column: example[column] for column in columns}
+
+
 def construct_label_vocab_matrices(
     dataset,
     tokenizer,
@@ -83,7 +88,7 @@ def ConstructFeatures(
     dataset,
     tokenizer,
     batch_size=512,
-    top_k=200,
+    top_k=2000,
     feature_text_selector=None,
 ):
     feature_dataset = (
