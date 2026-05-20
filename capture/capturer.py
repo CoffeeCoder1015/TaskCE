@@ -16,9 +16,6 @@ class CapturedResults:
     states: torch.Tensor
     labels: Any
     layer: str
-    layer_index: int | None
-    model_id: str
-    lora_path: str | None
 
     def __getitem__(self, key):
         return getattr(self, key)
@@ -32,10 +29,7 @@ class CapturedResults:
             f"{type(self).__name__}("
             f"states={state_summary}, "
             f"labels={len(self.labels)} labels, "
-            f"layer={self.layer!r}, "
-            f"layer_index={self.layer_index!r}, "
-            f"model_id={self.model_id!r}, "
-            f"lora_path={self.lora_path!r})"
+            f"layer={self.layer!r})"
         )
 
 
@@ -50,13 +44,10 @@ def resolve_capture_layer(model, layer):
     if isinstance(layer, str):
         resolved_path = layer
         resolved_module = dict(named_layers)[layer]
-        layer_index = None
-
     else:
-        layer_index = layer
-        resolved_path, resolved_module = named_layers[layer_index]
+        resolved_path, resolved_module = named_layers[layer]
 
-    return resolved_module, resolved_path, layer_index
+    return resolved_module, resolved_path
 
 
 def checkpoint_sort_key(path):
@@ -122,7 +113,7 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
 
     states = []
     activations = {}
-    capture_layer, resolved_layer_path, resolved_layer_index = resolve_capture_layer(model, layer)
+    capture_layer, resolved_layer_path = resolve_capture_layer(model, layer)
 
     def capture_hook(module, inputs, output):
         activations[resolved_layer_path] = output.detach()
@@ -173,9 +164,6 @@ def capture_task_activations(model_id, tokenizer, task, layer, lora_path=None, b
             states=states,
             labels=labels,
             layer=resolved_layer_path,
-            layer_index=resolved_layer_index,
-            model_id=model_id,
-            lora_path=lora_path,
         )
     finally:
         # The hook must always be removed so future captures do not append stale values.
