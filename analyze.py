@@ -91,28 +91,24 @@ if __name__ == "__main__":
     model_id = "LiquidAI/LFM2.5-1.2B-Thinking"
     snli_feature_tokenizer = get_tokenizer(
         "spacy-pos-snli-features",
-        snli.map(
-            select_tokenizer_training_text(["premise", "hypothesis"]),
-            remove_columns=snli.column_names,
-        ),
+        snli.map(select_tokenizer_training_text(["premise", "hypothesis"]))
     )
     claim_feature_tokenizer = get_tokenizer(
         "spacy-pos-claim-features",
-        vitaminc.map(
-            select_tokenizer_training_text(["claim", "evidence"]),
-            remove_columns=vitaminc.column_names,
-        ),
+        vitaminc.map(select_tokenizer_training_text(["claim", "evidence"]))
     )
     snli_features = ConstructFeatures(
         snli,
         snli_feature_tokenizer,
         feature_text_selector=identity_column_selector(["premise", "hypothesis"]),
     )
+    print(snli_features[:30])
     claim_features = ConstructFeatures(
         vitaminc,
         claim_feature_tokenizer,
         feature_text_selector=identity_column_selector(["claim", "evidence"]),
     )
+    print(claim_features[:30])
 
     lora_dir = "../multitune/output"
 
