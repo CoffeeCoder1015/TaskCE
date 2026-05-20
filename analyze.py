@@ -74,6 +74,7 @@ class AnalysisTarget:
     class_token_ids: dict[str, int]
     feature_text_selector: Callable
     data_formatter: Callable
+    batch_size: int = 256
     model_task_name: str | None = None
 
     @property
@@ -139,6 +140,7 @@ ANALYSIS_TARGETS = {
         class_token_ids=VITAMINC_CLASS_TOKEN_IDS,
         feature_text_selector=select_vitaminc_feature_text,
         data_formatter=format_vitaminc_for_capture,
+        batch_size=64,
     ),
 }
 
@@ -193,8 +195,13 @@ def extract_first_class(content, classes):
     )[0]
 
 
+def stage_task_message(stage, task_name):
+    return f"[{stage}] is operating on task {task_name}"
+
+
 def log_stage_task(stage, target):
-    print( f"[{stage}] is operating on task {target.name}" )
+    print(stage_task_message(stage, target.name))
+
 
 def selected_targets(target_name):
     if target_name == "all":
@@ -244,16 +251,28 @@ def build_capture_configs(targets, datasets):
     ]
 
 
-def capture_analysis_targets(targets, datasets):
+def targets_by_batch_size(targets):
+    grouped_targets = {}
     for target in targets:
-        log_stage_task("capture", target)
-    return Capture(
-        model_id=MODEL_ID,
-        lora_dir=LORA_DIR,
-        tasks=build_capture_configs(targets, datasets),
-        layer=-2,
-        batch_size=256,
-    )
+        grouped_targets.setdefault(target.batch_size, []).append(target)
+    return grouped_targets
+
+
+def capture_analysis_targets(targets, datasets):
+    capture_results = {}
+    for batch_size, batch_targets in targets_by_batch_size(targets).items():
+        for target in batch_targets:
+            log_stage_task("capture", target)
+        capture_results.update(
+            Capture(
+                model_id=MODEL_ID,
+                lora_dir=LORA_DIR,
+                tasks=build_capture_configs(batch_targets, datasets),
+                layer=-2,
+                batch_size=batch_size,
+            )
+        )
+    return capture_results
 
 
 def load_classification_weights_for_target(target):
@@ -315,6 +334,7 @@ def run_target_ablation(target, dataset, lora_path):
         layer=-2,
         class_token_ids=target.class_token_ids,
         lora_path=lora_path,
+        batch_size=target.batch_size,
     )
 
     log_stage_task("ablation run", target)
