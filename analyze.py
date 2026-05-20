@@ -7,7 +7,6 @@ from analysis.saving import (
     build_neuron_search_results_dataframe,
     save_neuron_search_results_csv,
 )
-from transformers import AutoTokenizer
 
 from capture.classification_weights import (
     get_classification_weights,
@@ -19,6 +18,7 @@ from capture.postprocessing import threshold, prune_min_acts
 
 from feature.construct import ConstructFeatures, identity_column_selector
 from feature.search import search_all, searchConfig
+from token import get_tokenizer
 
 
 SNLI_LABELS = ("entailment", "neutral", "contradiction")
@@ -76,20 +76,41 @@ def post_process_activations(activation, alpha, min_acts):
     return binarized_activations, kept_bin_activations, kept_neurons
 
 
+def select_tokenizer_training_text(columns: list[str]):
+    def selector(example):
+        example["text"] = "\n".join(str(example[column]) for column in columns)
+        return {"text": example["text"]}
+
+    return selector
+
+
 if __name__ == "__main__":
     snli = load_dataset("snli", split="validation")
     vitaminc = load_dataset("tals/vitaminc", split="validation[:10_000]")
 
     model_id = "LiquidAI/LFM2.5-1.2B-Thinking"
-    feature_tokenizer = AutoTokenizer.from_pretrained(model_id)
+    snli_feature_tokenizer = get_tokenizer(
+        "spacy-pos-snli-features",
+        snli.map(
+            select_tokenizer_training_text(["premise", "hypothesis"]),
+            remove_columns=snli.column_names,
+        ),
+    )
+    claim_feature_tokenizer = get_tokenizer(
+        "spacy-pos-claim-features",
+        vitaminc.map(
+            select_tokenizer_training_text(["claim", "evidence"]),
+            remove_columns=vitaminc.column_names,
+        ),
+    )
     snli_features = ConstructFeatures(
         snli,
-        feature_tokenizer,
+        snli_feature_tokenizer,
         feature_text_selector=identity_column_selector(["premise", "hypothesis"]),
     )
     claim_features = ConstructFeatures(
         vitaminc,
-        feature_tokenizer,
+        claim_feature_tokenizer,
         feature_text_selector=identity_column_selector(["claim", "evidence"]),
     )
 
