@@ -4,7 +4,7 @@ from transformers import AutoTokenizer, PreTrainedTokenizerFast
 from tokenizers.trainers import WordLevelTrainer
 
 from corpus import build_corpus_from_dataset
-from tokenizer import build_tokenizer
+from tokenizer import SPACY_POS_TAG_TOKENS, TOKENIZER_SPECIAL_TOKENS, build_tokenizer
 
 
 TOKENIZER_DIR = Path("tokenizers")
@@ -16,7 +16,7 @@ def get_tokenizer(name, formatted_dataset):
     if not (tokenizer_path / "tokenizer.json").exists():
         tokenizer = build_tokenizer()
         trainer = WordLevelTrainer(
-            special_tokens=["[UNK]", "[PAD]", "[CLS]", "[SEP]", "[MASK]"],
+            special_tokens=TOKENIZER_SPECIAL_TOKENS,
         )
         tokenizer.train_from_iterator(
             build_corpus_from_dataset(formatted_dataset),
@@ -29,6 +29,7 @@ def get_tokenizer(name, formatted_dataset):
             cls_token="[CLS]",
             sep_token="[SEP]",
             mask_token="[MASK]",
+            additional_special_tokens=SPACY_POS_TAG_TOKENS,
         )
 
         tokenizer_path.mkdir(parents=True, exist_ok=True)
