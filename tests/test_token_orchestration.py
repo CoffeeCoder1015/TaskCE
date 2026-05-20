@@ -7,14 +7,19 @@ from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import WhitespaceSplit
 
 
-def test_get_tokenizer_loads_existing_tokenizer(tmp_path, monkeypatch):
-    import importlib.util
+def load_orchestration_module(monkeypatch):
+    import importlib
+    import sys
 
-    module_path = Path(__file__).resolve().parents[1] / "token" / "orchestration.py"
-    monkeypatch.syspath_prepend(str(module_path.parent))
-    spec = importlib.util.spec_from_file_location("taskce_token_orchestration", module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    repo_root = Path(__file__).resolve().parents[1]
+    monkeypatch.syspath_prepend(str(repo_root))
+    sys.modules.pop("token", None)
+    sys.modules.pop("token.orchestration", None)
+    return importlib.import_module("token.orchestration")
+
+
+def test_get_tokenizer_loads_existing_tokenizer(tmp_path, monkeypatch):
+    module = load_orchestration_module(monkeypatch)
 
     tokenizer_dir = tmp_path / "demo"
     tokenizer_dir.mkdir()
@@ -24,23 +29,24 @@ def test_get_tokenizer_loads_existing_tokenizer(tmp_path, monkeypatch):
         tokenizer_object=tokenizer,
         unk_token="[UNK]",
         pad_token="[PAD]",
+        additional_special_tokens=module.SPACY_POS_TAG_TOKENS,
     ).save_pretrained(tokenizer_dir)
 
     monkeypatch.setattr(module, "TOKENIZER_DIR", tmp_path)
+    monkeypatch.setattr(
+        module,
+        "build_tokenizer",
+        lambda: (_ for _ in ()).throw(AssertionError("should load existing tokenizer")),
+    )
 
     loaded = module.get_tokenizer("demo", Dataset.from_dict({"text": ["ignored"]}))
 
     assert loaded("hello", add_special_tokens=False)["input_ids"] == [1]
+    assert set(module.SPACY_POS_TAG_TOKENS) <= set(loaded.additional_special_tokens)
 
 
 def test_get_tokenizer_trains_and_saves_when_missing(tmp_path, monkeypatch):
-    import importlib.util
-
-    module_path = Path(__file__).resolve().parents[1] / "token" / "orchestration.py"
-    monkeypatch.syspath_prepend(str(module_path.parent))
-    spec = importlib.util.spec_from_file_location("taskce_token_orchestration", module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = load_orchestration_module(monkeypatch)
 
     monkeypatch.setattr(module, "TOKENIZER_DIR", tmp_path)
     def build_tokenizer():
@@ -66,3 +72,4 @@ def test_get_tokenizer_trains_and_saves_when_missing(tmp_path, monkeypatch):
     assert (tmp_path / "demo" / "tokenizer.json").exists()
     assert load_calls == [tmp_path / "demo"]
     assert tokenizer("hello", add_special_tokens=False)["input_ids"]
+    assert set(module.SPACY_POS_TAG_TOKENS) <= set(tokenizer.additional_special_tokens)
