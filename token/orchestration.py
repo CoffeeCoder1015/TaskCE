@@ -3,8 +3,9 @@ from pathlib import Path
 from transformers import AutoTokenizer, PreTrainedTokenizerFast
 from tokenizers.trainers import WordLevelTrainer
 
-from corpus import build_corpus_from_dataset
-from tokenizer import SPACY_POS_TAG_TOKENS, TOKENIZER_SPECIAL_TOKENS, build_tokenizer
+from . import SPACY_POS_TAG_TOKENS, TOKENIZER_SPECIAL_TOKENS
+from .corpus import build_corpus_from_dataset
+from .tokenizer import build_tokenizer
 
 
 TOKENIZER_DIR = Path("tokenizers")
