@@ -10,9 +10,6 @@ SEARCH_RESULT_COLUMNS = [
     "neuron",
     "formula",
     "iou",
-    "weight_ent",
-    "weight_neut",
-    "weight_contr",
 ]
 PRUNED_FORMULA = "LOW_ACTS_PRUNED"
 DEFAULT_PERCENTILES = tuple(step / 10 for step in range(1, 11))
@@ -40,8 +37,6 @@ def run_ablation_analysis(
     weight_column_names=None,
 ):
     config = config or AblationAnalysisConfig()
-    weight_column_names = list(weight_column_names or SEARCH_RESULT_COLUMNS[3:])
-    required_columns = ["neuron", "formula", "iou", *weight_column_names]
     result_csv_path = Path(result_csv_path)
     output_dir = Path(output_dir) if output_dir is not None else result_csv_path.parent
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -49,7 +44,24 @@ def run_ablation_analysis(
     # Stage 1: load the search result CSV produced after feature search.
     search_results = pd.read_csv(result_csv_path)
     missing_columns = [
-        column for column in required_columns if column not in search_results.columns
+        column for column in SEARCH_RESULT_COLUMNS if column not in search_results.columns
+    ]
+    if missing_columns:
+        raise ValueError(f"search result CSV missing required columns: {missing_columns}")
+
+    if weight_column_names is None:
+        weight_column_names = [
+            column
+            for column in search_results.columns
+            if column.startswith("weight_")
+        ]
+        if not weight_column_names:
+            raise ValueError("search result CSV missing weight columns")
+    else:
+        weight_column_names = list(weight_column_names)
+    required_columns = [*SEARCH_RESULT_COLUMNS, *weight_column_names]
+    missing_columns = [
+        column for column in weight_column_names if column not in search_results.columns
     ]
     if missing_columns:
         raise ValueError(f"search result CSV missing required columns: {missing_columns}")
