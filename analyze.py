@@ -1,12 +1,18 @@
 import os
+
 from datasets import load_dataset
+from analysis import run_ablation, run_ablation_analysis
+from analysis.ablation_inference import AblationInferenceEngine, AblationTaskConfig
 from analysis.saving import (
     build_neuron_search_results_dataframe,
     save_neuron_search_results_csv,
 )
 from transformers import AutoTokenizer
 
-from capture.classification_weights import get_classification_weights
+from capture.classification_weights import (
+    get_classification_weights,
+    latest_task_lora_checkpoint,
+)
 from capture.captureConfig import CaptureConfig
 from capture.capturer import Capture
 from capture.postprocessing import threshold, prune_min_acts
@@ -114,6 +120,8 @@ if __name__ == "__main__":
             "features": snli_features,
             "class_token_ids": SNLI_CLASS_TOKEN_IDS,
             "labels": SNLI_LABELS,
+            "dataset": snli,
+            "data_formatter": format_snli_for_capture,
         },
         {
             "name": "claim",
@@ -122,6 +130,8 @@ if __name__ == "__main__":
             "features": claim_features,
             "class_token_ids": VITAMINC_CLASS_TOKEN_IDS,
             "labels": VITAMINC_LABELS,
+            "dataset": vitaminc,
+            "data_formatter": format_vitaminc_for_capture,
         },
     ]
 
@@ -137,6 +147,7 @@ if __name__ == "__main__":
             min_acts,
         )
 
+        # Searches
         search_results = search_all(
             kept_activations,
             features,
@@ -157,3 +168,32 @@ if __name__ == "__main__":
 
         output_csv_path = os.path.join(output_dir, f"{name}_beam_results.csv")
         save_neuron_search_results_csv(dataframe, output_csv_path)
+
+        # Ablations
+        task_output_dir = os.path.join(output_dir, name)
+        analysis_result = run_ablation_analysis(
+            result_csv_path=output_csv_path,
+            output_dir=task_output_dir,
+            weight_column_names=weight_column_names,
+        )
+        ablation_task = AblationTaskConfig(
+            name=name,
+            dataset=task["dataset"],
+            data_formatter=task["data_formatter"],
+        )
+        lora_path = latest_task_lora_checkpoint(lora_dir, name)
+        inference_engine = AblationInferenceEngine(
+            model_id=model_id,
+            task=ablation_task,
+            layer=-2,
+            class_token_ids=task["class_token_ids"],
+            lora_path=lora_path,
+        )
+        try:
+            run_ablation(
+                analysis_result=analysis_result,
+                inference_engine=inference_engine,
+                output_dir=task_output_dir,
+            )
+        finally:
+            inference_engine.close()

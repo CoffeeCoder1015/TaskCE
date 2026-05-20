@@ -1,10 +1,18 @@
 from collections import Counter
+from dataclasses import dataclass
 import gc
 
 from peft import PeftModel
 import torch
 from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
+
+
+@dataclass
+class AblationTaskConfig:
+    name: str
+    dataset: object
+    data_formatter: object
 
 
 def make_ablation_hook(neuron_ids):
