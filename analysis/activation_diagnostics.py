@@ -52,11 +52,14 @@ def save_raw_activation_alpha_diagnostics(
 
     correlation_heatmap_path = output_dir / "raw_activation_correlation_heatmap.png"
     plot_raw_correlation_heatmap(raw_acts, correlation_heatmap_path)
+    covariance_heatmap_path = output_dir / "raw_activation_covariance_heatmap.png"
+    plot_raw_covariance_heatmap(raw_acts, covariance_heatmap_path)
 
     return {
         "alpha_sweep": summary_path,
         "activation_traces": traces_path,
         "correlation_heatmap": correlation_heatmap_path,
+        "covariance_heatmap": covariance_heatmap_path,
     }
 
 
@@ -279,6 +282,33 @@ def plot_raw_correlation_heatmap(raw_acts, output_path):
     plt.close()
 
 
+def plot_raw_covariance_heatmap(raw_acts, output_path):
+    covariance = raw_activation_covariance_matrix(raw_acts)
+    if covariance.size == 0:
+        plot_empty_heatmap(output_path, "Raw activation covariance heatmap")
+        return
+
+    max_abs_covariance = float(np.max(np.abs(covariance))) if covariance.size else 0.0
+    color_limit = max_abs_covariance if max_abs_covariance > 0 else 1.0
+
+    plt.figure(figsize=(10, 8))
+    image = plt.imshow(
+        covariance,
+        cmap="coolwarm",
+        vmin=-color_limit,
+        vmax=color_limit,
+        interpolation="nearest",
+        aspect="auto",
+    )
+    plt.colorbar(image, label="Covariance")
+    plt.title("Raw activation covariance heatmap")
+    plt.xlabel("Neuron index")
+    plt.ylabel("Neuron index")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+
 def plot_empty_heatmap(output_path, title):
     plt.figure(figsize=(10, 8))
     plt.text(0.5, 0.5, "No neuron columns", ha="center", va="center")
@@ -304,6 +334,16 @@ def raw_activation_correlation_matrix(raw_acts):
     correlation[:, constant_columns] = 0.0
     np.fill_diagonal(correlation, 1.0)
     return correlation
+
+
+def raw_activation_covariance_matrix(raw_acts):
+    values = raw_acts.numpy()
+    if values.shape[1] == 0:
+        return np.empty((0, 0))
+    if values.shape[0] <= 1:
+        return np.zeros((values.shape[1], values.shape[1]))
+
+    return np.atleast_2d(np.cov(values, rowvar=False))
 
 
 def adaptive_bins(values, max_bins=DEFAULT_MAX_BINS):
