@@ -92,9 +92,9 @@ class SpacyPretokenizer:
         pretok.split(self.spacy_split)
 
 
-def attach_spacy_pretokenizer(tokenizer):
+def attach_spacy_pretokenizer(tokenizer,enable_pos=False):
     tokenizer.pre_tokenizer = pre_tokenizers.PreTokenizer.custom(
-        SpacyPretokenizer(enable_pos=True)
+        SpacyPretokenizer(enable_pos=enable_pos)
     )
     return tokenizer
 
@@ -107,10 +107,10 @@ def detach_spacy_pretokenizer(tokenizer):
     return tokenizer
 
 
-def build_tokenizer():
+def build_tokenizer(enable_pos=False):
     tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
     tokenizer.normalizer = Lowercase()
-    return attach_spacy_pretokenizer(tokenizer)
+    return attach_spacy_pretokenizer(tokenizer, enable_pos=enable_pos)
 
 
 if __name__ == "__main__":
