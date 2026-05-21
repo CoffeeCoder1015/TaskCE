@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 
 COUNT_PERCENTILES = (50, 75, 90, 95, 99)
 DEFAULT_MAX_BINS = 200
+DEFAULT_TRACE_NEURONS_PER_PLOT = 1
+DEFAULT_TRACE_SUBPLOT_COLUMNS = 32
 
 
 def save_raw_activation_alpha_diagnostics(
@@ -21,6 +23,8 @@ def save_raw_activation_alpha_diagnostics(
     output_dir,
     *,
     alpha_candidates=None,
+    trace_neurons_per_plot=DEFAULT_TRACE_NEURONS_PER_PLOT,
+    trace_subplot_columns=DEFAULT_TRACE_SUBPLOT_COLUMNS,
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -38,12 +42,12 @@ def save_raw_activation_alpha_diagnostics(
     summary_path = output_dir / "raw_activation_alpha_sweep.json"
     write_json(summary_path, {"min_acts": int(min_acts), "alpha_sweep": sweep})
 
-    configured_thresholds = per_neuron_thresholds(raw_acts, alpha).numpy()
-    threshold_hist_path = output_dir / "raw_activation_threshold_hist.png"
-    plot_threshold_histogram(
-        configured_thresholds,
-        alpha=alpha,
-        output_path=threshold_hist_path,
+    traces_path = output_dir / "raw_activation_traces.png"
+    plot_raw_activation_traces(
+        raw_acts,
+        traces_path,
+        neurons_per_plot=trace_neurons_per_plot,
+        subplot_columns=trace_subplot_columns,
     )
 
     correlation_heatmap_path = output_dir / "raw_activation_correlation_heatmap.png"
@@ -51,7 +55,7 @@ def save_raw_activation_alpha_diagnostics(
 
     return {
         "alpha_sweep": summary_path,
-        "threshold_hist": threshold_hist_path,
+        "activation_traces": traces_path,
         "correlation_heatmap": correlation_heatmap_path,
     }
 
@@ -185,28 +189,64 @@ def plot_activation_count_histogram(counts, min_acts, output_path, title):
     plt.close()
 
 
-def plot_threshold_histogram(thresholds, alpha, output_path):
-    plt.figure(figsize=(10, 6))
-    if thresholds.size == 0:
-        plt.text(0.5, 0.5, "No threshold values", ha="center", va="center")
-    else:
-        plt.hist(thresholds, bins=adaptive_bins(thresholds), color="lightsteelblue", edgecolor="black")
-        for percentile in COUNT_PERCENTILES:
-            value = float(np.percentile(thresholds, percentile))
-            plt.axvline(
-                value,
-                linestyle="--",
-                linewidth=1.5,
-                label=f"p{percentile} = {value:.4g}",
-            )
-        plt.legend()
-    plt.title(f"Per-neuron raw activation thresholds at alpha = {alpha:g}")
-    plt.xlabel("Raw activation threshold")
-    plt.ylabel("Number of neurons")
-    plt.grid(True, linestyle="--", alpha=0.7)
-    plt.tight_layout()
-    plt.savefig(output_path)
-    plt.close()
+def plot_raw_activation_traces(
+    raw_acts,
+    output_path,
+    *,
+    neurons_per_plot=DEFAULT_TRACE_NEURONS_PER_PLOT,
+    subplot_columns=DEFAULT_TRACE_SUBPLOT_COLUMNS,
+):
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    values = raw_acts.numpy()
+    total_neurons = values.shape[1]
+    if neurons_per_plot <= 0:
+        raise ValueError("neurons_per_plot must be positive")
+    if subplot_columns <= 0:
+        raise ValueError("subplot_columns must be positive")
+
+    if total_neurons == 0:
+        plt.figure(figsize=(10, 6))
+        plt.text(0.5, 0.5, "No raw activations", ha="center", va="center")
+        plt.title("Raw neuron activations over examples")
+        plt.xlabel("Example index")
+        plt.ylabel("Raw activation")
+        plt.tight_layout()
+        plt.savefig(output_path)
+        plt.close()
+        return output_path
+
+    x = np.arange(values.shape[0])
+    chunks = list(range(0, total_neurons, neurons_per_plot))
+    subplot_count = len(chunks)
+    columns = min(subplot_columns, subplot_count)
+    rows = int(np.ceil(subplot_count / columns))
+    fig, axes = plt.subplots(
+        rows,
+        columns,
+        figsize=(columns * 5, rows * 3),
+        squeeze=False,
+        sharex=True,
+    )
+    axes_flat = axes.flatten()
+
+    for axis, start in zip(axes_flat, chunks, strict=False):
+        stop = min(start + neurons_per_plot, total_neurons)
+        for neuron_index in range(start, stop):
+            axis.plot(x, values[:, neuron_index], linewidth=0.45, alpha=0.45)
+        axis.set_title(f"Neurons {start}-{stop - 1}", fontsize=9)
+        axis.grid(True, linestyle="--", alpha=0.5)
+
+    for axis in axes_flat[subplot_count:]:
+        axis.axis("off")
+
+    fig.suptitle("Raw neuron activations over examples", fontsize=14)
+    fig.supxlabel("Example index")
+    fig.supylabel("Raw activation")
+    fig.tight_layout()
+    fig.savefig(output_path)
+    plt.close(fig)
+    return output_path
 
 
 def plot_raw_correlation_heatmap(raw_acts, output_path):
