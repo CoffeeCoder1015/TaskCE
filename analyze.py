@@ -2,6 +2,10 @@ import os
 
 from datasets import load_dataset
 from analysis import run_ablation, run_ablation_analysis
+from analysis.activation_diagnostics import (
+    save_binary_activation_count_diagnostics,
+    save_raw_activation_alpha_diagnostics,
+)
 from analysis.ablation_inference import AblationInferenceEngine, AblationTaskConfig
 from analysis.saving import (
     build_neuron_search_results_dataframe,
@@ -158,10 +162,22 @@ if __name__ == "__main__":
         min_acts = task["min_acts"]
         features = task["features"]
         activations = captured_results[name]["finetuned"]
-        binarized_activations, kept_activations, kept_neurons = post_process_activations(
-            activations,
+        task_output_dir = os.path.join(output_dir, name)
+        save_raw_activation_alpha_diagnostics(
+            activations.states,
             alpha,
             min_acts,
+            task_output_dir,
+        )
+        binarized_activations = threshold(activations.states, alpha=alpha)
+        save_binary_activation_count_diagnostics(
+            binarized_activations,
+            min_acts,
+            task_output_dir,
+        )
+        kept_activations, kept_neurons = prune_min_acts(
+            binarized_activations,
+            min_acts=min_acts,
         )
 
         # Searches
@@ -187,7 +203,6 @@ if __name__ == "__main__":
         save_neuron_search_results_csv(dataframe, output_csv_path)
 
         # Ablations
-        task_output_dir = os.path.join(output_dir, name)
         analysis_result = run_ablation_analysis(
             result_csv_path=output_csv_path,
             output_dir=task_output_dir,
