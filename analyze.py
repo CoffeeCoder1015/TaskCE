@@ -101,6 +101,7 @@ if __name__ == "__main__":
         "spacy-pos-claim-features",
         vitaminc.map(select_tokenizer_training_text(["claim", "evidence"]))
     )
+    model_tokenizer = AutoTokenizer.from_pretrained(model_id) # Not used, but for comparison
     snli_features = ConstructFeatures(
         snli,
         snli_feature_tokenizer,
