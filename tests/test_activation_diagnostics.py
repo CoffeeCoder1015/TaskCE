@@ -63,6 +63,7 @@ def test_raw_activation_alpha_diagnostics_sweeps_candidates_and_plots(tmp_path):
         min_acts=2,
         output_dir=tmp_path,
         alpha_candidates=[0.5],
+        trace_neurons_per_plot=2,
     )
 
     summary = load_json(paths["alpha_sweep"])
@@ -77,7 +78,7 @@ def test_raw_activation_alpha_diagnostics_sweeps_candidates_and_plots(tmp_path):
     assert record["kept_percent"] == pytest.approx(100 / 3)
     assert record["activation_count_percentiles"]["max"] == 2.0
 
-    assert os.path.getsize(paths["threshold_hist"]) > 0
+    assert os.path.getsize(paths["activation_traces"]) > 0
     assert os.path.getsize(paths["correlation_heatmap"]) > 0
 
 
