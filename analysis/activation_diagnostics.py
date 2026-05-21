@@ -214,11 +214,13 @@ def plot_raw_correlation_heatmap(raw_acts, output_path):
     if values.shape[1] == 0:
         correlation = np.empty((0, 0))
     else:
+        # Normalizations
         centered = values - values.mean(axis=0, keepdims=True)
         norms = np.linalg.norm(centered, axis=0)
         safe_norms = np.where(norms == 0, 1.0, norms)
         normalized = centered / safe_norms
-        correlation = normalized.T @ normalized
+
+        correlation = np.matmul(normalized.T, normalized)
         constant_columns = norms == 0
         correlation[constant_columns, :] = 0.0
         correlation[:, constant_columns] = 0.0
