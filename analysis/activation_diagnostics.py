@@ -102,6 +102,12 @@ def local_alpha_candidates(alpha):
 
 
 def alpha_sweep_record(raw_acts, alpha, min_acts):
+    if raw_acts.shape[0] == 0 or raw_acts.shape[1] == 0:
+        counts = torch.zeros(raw_acts.shape[1], dtype=torch.float32)
+        record = count_summary(counts, min_acts)
+        record["alpha"] = float(alpha)
+        return record
+
     thresholds = per_neuron_thresholds(raw_acts, alpha)
     binary_acts = raw_acts > thresholds
     counts = activation_counts(binary_acts)
@@ -250,21 +256,10 @@ def plot_raw_activation_traces(
 
 
 def plot_raw_correlation_heatmap(raw_acts, output_path):
-    values = raw_acts.numpy()
-    if values.shape[1] == 0:
-        correlation = np.empty((0, 0))
-    else:
-        # Normalizations
-        centered = values - values.mean(axis=0, keepdims=True)
-        norms = np.linalg.norm(centered, axis=0)
-        safe_norms = np.where(norms == 0, 1.0, norms)
-        normalized = centered / safe_norms
-
-        correlation = np.matmul(normalized.T, normalized)
-        constant_columns = norms == 0
-        correlation[constant_columns, :] = 0.0
-        correlation[:, constant_columns] = 0.0
-        np.fill_diagonal(correlation, 1.0)
+    correlation = raw_activation_correlation_matrix(raw_acts)
+    if correlation.size == 0:
+        plot_empty_heatmap(output_path, "Raw activation correlation heatmap")
+        return
 
     plt.figure(figsize=(10, 8))
     image = plt.imshow(
@@ -282,6 +277,33 @@ def plot_raw_correlation_heatmap(raw_acts, output_path):
     plt.tight_layout()
     plt.savefig(output_path)
     plt.close()
+
+
+def plot_empty_heatmap(output_path, title):
+    plt.figure(figsize=(10, 8))
+    plt.text(0.5, 0.5, "No neuron columns", ha="center", va="center")
+    plt.title(title)
+    plt.xlabel("Neuron index")
+    plt.ylabel("Neuron index")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+
+def raw_activation_correlation_matrix(raw_acts):
+    values = raw_acts.numpy()
+    if values.shape[1] == 0:
+        return np.empty((0, 0))
+    if values.shape[0] <= 1:
+        return np.eye(values.shape[1])
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        correlation = np.atleast_2d(np.corrcoef(values, rowvar=False))
+    constant_columns = values.std(axis=0) == 0
+    correlation[constant_columns, :] = 0.0
+    correlation[:, constant_columns] = 0.0
+    np.fill_diagonal(correlation, 1.0)
+    return correlation
 
 
 def adaptive_bins(values, max_bins=DEFAULT_MAX_BINS):
