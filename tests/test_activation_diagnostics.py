@@ -8,6 +8,7 @@ import torch
 from analysis.activation_diagnostics import (
     local_alpha_candidates,
     raw_activation_correlation_matrix,
+    raw_activation_covariance_matrix,
     save_binary_activation_count_diagnostics,
     save_raw_activation_alpha_diagnostics,
 )
@@ -82,11 +83,34 @@ def test_raw_activation_alpha_diagnostics_sweeps_candidates_and_plots(tmp_path):
 
     assert os.path.getsize(paths["activation_traces"]) > 0
     assert os.path.getsize(paths["correlation_heatmap"]) > 0
+    assert os.path.getsize(paths["covariance_heatmap"]) > 0
 
 
 def test_local_alpha_candidates_are_clipped_and_deduplicated():
     assert local_alpha_candidates(0.05) == [0.05, 0.1, 0.15]
     assert local_alpha_candidates(0.95) == [0.85, 0.9, 0.95]
+
+
+def test_raw_activation_covariance_matrix_preserves_magnitude():
+    raw_acts = torch.tensor(
+        [
+            [1.0, 10.0],
+            [2.0, 20.0],
+            [3.0, 30.0],
+        ]
+    )
+
+    covariance = raw_activation_covariance_matrix(raw_acts)
+
+    np.testing.assert_allclose(
+        covariance,
+        np.array(
+            [
+                [1.0, 10.0],
+                [10.0, 100.0],
+            ]
+        ),
+    )
 
 
 def test_raw_activation_correlation_matrix_normalizes_scale_and_handles_constants():
@@ -110,3 +134,19 @@ def test_raw_activation_correlation_matrix_normalizes_scale_and_handles_constant
             ]
         ),
     )
+
+
+def test_raw_activation_diagnostics_handles_zero_neuron_matrices(tmp_path):
+    raw_acts = torch.empty((3, 0))
+
+    paths = save_raw_activation_alpha_diagnostics(
+        raw_acts,
+        alpha=0.5,
+        min_acts=2,
+        output_dir=tmp_path,
+        alpha_candidates=[0.5],
+    )
+
+    assert os.path.getsize(paths["activation_traces"]) > 0
+    assert os.path.getsize(paths["correlation_heatmap"]) > 0
+    assert os.path.getsize(paths["covariance_heatmap"]) > 0
