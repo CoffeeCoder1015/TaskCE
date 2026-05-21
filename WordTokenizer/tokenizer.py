@@ -63,7 +63,7 @@ SPACY_POS_TAG_TOKENS = [
     "<_SP>",    # whitespace
     "<``>",     # opening quotation mark
 ]
-TOKENIZER_SPECIAL_TOKENS = BASE_SPECIAL_TOKENS + SPACY_POS_TAG_TOKENS
+TOKENIZER_SPECIAL_TOKENS = BASE_SPECIAL_TOKENS
 
 
 class SpacyPretokenizer:
@@ -141,7 +141,9 @@ if __name__ == "__main__":
         cls_token="[CLS]",
         sep_token="[SEP]",
         mask_token="[MASK]",
-        additional_special_tokens=SPACY_POS_TAG_TOKENS,
+    )
+    demo_hf_tokenizer.add_special_tokens(
+        {"additional_special_tokens": SPACY_POS_TAG_TOKENS}
     )
 
     attach_spacy_pretokenizer(demo_hf_tokenizer.backend_tokenizer)
