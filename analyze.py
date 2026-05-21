@@ -147,7 +147,7 @@ if __name__ == "__main__":
         },
         {
             "name": "claim",
-            "alpha": 0.5,
+            "alpha": 0.052,
             "min_acts": 500,
             "features": claim_features,
             "class_token_ids": VITAMINC_CLASS_TOKEN_IDS,
