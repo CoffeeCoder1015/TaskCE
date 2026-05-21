@@ -1,6 +1,7 @@
 import os
 
 from datasets import load_dataset
+from transformers import AutoTokenizer
 from analysis import run_ablation, run_ablation_analysis
 from analysis.activation_diagnostics import (
     save_binary_activation_count_diagnostics,
