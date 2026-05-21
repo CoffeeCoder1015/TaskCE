@@ -36,8 +36,8 @@ def get_tokenizer(name, formatted_dataset):
             cls_token="[CLS]",
             sep_token="[SEP]",
             mask_token="[MASK]",
-            additional_special_tokens=SPACY_POS_TAG_TOKENS,
         )
+        tokenizer.add_special_tokens({"additional_special_tokens": SPACY_POS_TAG_TOKENS})
 
         tokenizer_path.mkdir(parents=True, exist_ok=True)
         tokenizer.save_pretrained(tokenizer_path)

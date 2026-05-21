@@ -63,6 +63,7 @@ def test_get_tokenizer_loads_existing_tokenizer(tmp_path, monkeypatch):
 
     assert loaded("hello", add_special_tokens=False)["input_ids"] == [1]
     assert set(module.SPACY_POS_TAG_TOKENS) <= set(loaded.additional_special_tokens)
+    assert max(loaded.additional_special_tokens_ids) < len(loaded)
     assert len(attached) == 1
 
 
@@ -106,6 +107,7 @@ def test_get_tokenizer_trains_and_saves_when_missing(tmp_path, monkeypatch):
     assert load_calls == [tmp_path / "demo"]
     assert tokenizer("hello", add_special_tokens=False)["input_ids"]
     assert set(module.SPACY_POS_TAG_TOKENS) <= set(tokenizer.additional_special_tokens)
+    assert max(tokenizer.additional_special_tokens_ids) < len(tokenizer)
     assert len(attached) == 1
     assert len(detached) == 1
 
@@ -125,3 +127,4 @@ def test_get_tokenizer_detaches_spacy_pretokenizer_before_fast_wrapper(
 
     assert tokenizer("hello", add_special_tokens=False)["input_ids"]
     assert set(module.SPACY_POS_TAG_TOKENS) <= set(tokenizer.additional_special_tokens)
+    assert max(tokenizer.additional_special_tokens_ids) < len(tokenizer)
