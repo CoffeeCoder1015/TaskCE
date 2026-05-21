@@ -92,11 +92,25 @@ class SpacyPretokenizer:
         pretok.split(self.spacy_split)
 
 
+def attach_spacy_pretokenizer(tokenizer):
+    tokenizer.pre_tokenizer = pre_tokenizers.PreTokenizer.custom(
+        SpacyPretokenizer(enable_pos=True)
+    )
+    return tokenizer
+
+
+def detach_spacy_pretokenizer(tokenizer):
+    # Python custom pretokenizers are runtime-only: HF fast tokenizers deepcopy
+    # and serialize tokenizer JSON, so save/load uses WhitespaceSplit and then
+    # reattaches spaCy after loading.
+    tokenizer.pre_tokenizer = pre_tokenizers.WhitespaceSplit()
+    return tokenizer
+
+
 def build_tokenizer():
     tokenizer = Tokenizer(WordLevel(unk_token="[UNK]"))
     tokenizer.normalizer = Lowercase()
-    tokenizer.pre_tokenizer = pre_tokenizers.PreTokenizer.custom(SpacyPretokenizer(True))
-    return tokenizer
+    return attach_spacy_pretokenizer(tokenizer)
 
 
 if __name__ == "__main__":
@@ -118,6 +132,7 @@ if __name__ == "__main__":
 
     demo_train_data = build_corpus_from_dataset(demo_dataset)
     demo_tokenizer.train_from_iterator(demo_train_data, trainer=demo_trainer)
+    detach_spacy_pretokenizer(demo_tokenizer)
 
     demo_hf_tokenizer = PreTrainedTokenizerFast(
         tokenizer_object=demo_tokenizer,
@@ -129,6 +144,7 @@ if __name__ == "__main__":
         additional_special_tokens=SPACY_POS_TAG_TOKENS,
     )
 
+    attach_spacy_pretokenizer(demo_hf_tokenizer.backend_tokenizer)
     demo_encoded = demo_hf_tokenizer("a man is walking", add_special_tokens=False)
     print(demo_hf_tokenizer.tokenize("a man is walking"))
     print(demo_encoded["input_ids"])
