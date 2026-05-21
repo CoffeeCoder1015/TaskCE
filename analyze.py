@@ -80,6 +80,28 @@ def post_process_activations(activation, alpha, min_acts):
     return binarized_activations, kept_bin_activations, kept_neurons
 
 
+def save_activation_diagnostics(captured_results, search_tasks, output_dir):
+    for task in search_tasks:
+        name = task["name"]
+        alpha = task["alpha"]
+        min_acts = task["min_acts"]
+        activations = captured_results[name]["finetuned"]
+        task_output_dir = os.path.join(output_dir, name)
+
+        save_raw_activation_alpha_diagnostics(
+            activations.states,
+            alpha,
+            min_acts,
+            task_output_dir,
+        )
+        binarized_activations = threshold(activations.states, alpha=alpha)
+        save_binary_activation_count_diagnostics(
+            binarized_activations,
+            min_acts,
+            task_output_dir,
+        )
+
+
 def select_tokenizer_training_text(columns: list[str]):
     def selector(example):
         example["text"] = "\n".join(str(example[column]) for column in columns)
@@ -117,16 +139,6 @@ if __name__ == "__main__":
 
     lora_dir = "../multitune/output"
 
-    captured_results = Capture(
-        model_id,
-        lora_dir,
-        tasks=[
-            CaptureConfig("snli", snli, format_snli_for_capture),
-            CaptureConfig("claim", vitaminc, format_vitaminc_for_capture),
-        ],
-        layer=-2,
-    )
-
     output_dir = "results"
     search_config = searchConfig(
         formula_length=5,
@@ -137,7 +149,7 @@ if __name__ == "__main__":
     search_tasks = [
         {
             "name": "snli",
-            "alpha": 0.53,
+            "alpha": 0.055,
             "min_acts": 500,
             "features": snli_features,
             "class_token_ids": SNLI_CLASS_TOKEN_IDS,
@@ -157,6 +169,17 @@ if __name__ == "__main__":
         },
     ]
 
+    captured_results = Capture(
+        model_id,
+        lora_dir,
+        tasks=[
+            CaptureConfig("snli", snli, format_snli_for_capture),
+            CaptureConfig("claim", vitaminc, format_vitaminc_for_capture),
+        ],
+        layer=-2,
+    )
+    save_activation_diagnostics(captured_results, search_tasks, output_dir)
+
     for task in search_tasks:
         name = task["name"]
         alpha = task["alpha"]
@@ -164,21 +187,10 @@ if __name__ == "__main__":
         features = task["features"]
         activations = captured_results[name]["finetuned"]
         task_output_dir = os.path.join(output_dir, name)
-        save_raw_activation_alpha_diagnostics(
-            activations.states,
+        binarized_activations, kept_activations, kept_neurons = post_process_activations(
+            activations,
             alpha,
             min_acts,
-            task_output_dir,
-        )
-        binarized_activations = threshold(activations.states, alpha=alpha)
-        save_binary_activation_count_diagnostics(
-            binarized_activations,
-            min_acts,
-            task_output_dir,
-        )
-        kept_activations, kept_neurons = prune_min_acts(
-            binarized_activations,
-            min_acts=min_acts,
         )
 
         # Searches
