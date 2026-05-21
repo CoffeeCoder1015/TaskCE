@@ -4,7 +4,9 @@ from .tokenizer import (
     SPACY_POS_TAG_TOKENS,
     TOKENIZER_SPECIAL_TOKENS,
     SpacyPretokenizer,
+    attach_spacy_pretokenizer,
     build_tokenizer,
+    detach_spacy_pretokenizer,
 )
 
 __all__ = [
@@ -12,6 +14,8 @@ __all__ = [
     "SPACY_POS_TAG_TOKENS",
     "TOKENIZER_SPECIAL_TOKENS",
     "SpacyPretokenizer",
+    "attach_spacy_pretokenizer",
     "build_tokenizer",
+    "detach_spacy_pretokenizer",
     "get_tokenizer",
 ]
