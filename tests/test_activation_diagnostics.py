@@ -1,11 +1,13 @@
 import json
 import os
 
+import numpy as np
 import pytest
 import torch
 
 from analysis.activation_diagnostics import (
     local_alpha_candidates,
+    raw_activation_correlation_matrix,
     save_binary_activation_count_diagnostics,
     save_raw_activation_alpha_diagnostics,
 )
@@ -85,3 +87,26 @@ def test_raw_activation_alpha_diagnostics_sweeps_candidates_and_plots(tmp_path):
 def test_local_alpha_candidates_are_clipped_and_deduplicated():
     assert local_alpha_candidates(0.05) == [0.05, 0.1, 0.15]
     assert local_alpha_candidates(0.95) == [0.85, 0.9, 0.95]
+
+
+def test_raw_activation_correlation_matrix_normalizes_scale_and_handles_constants():
+    raw_acts = torch.tensor(
+        [
+            [1.0, 10.0, 5.0],
+            [2.0, 20.0, 5.0],
+            [3.0, 30.0, 5.0],
+        ]
+    )
+
+    correlation = raw_activation_correlation_matrix(raw_acts)
+
+    np.testing.assert_allclose(
+        correlation,
+        np.array(
+            [
+                [1.0, 1.0, 0.0],
+                [1.0, 1.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ]
+        ),
+    )
