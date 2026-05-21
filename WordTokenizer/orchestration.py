@@ -47,6 +47,5 @@ def get_tokenizer(name, formatted_dataset, enable_pos=False):
         tokenizer.save_pretrained(tokenizer_path)
 
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_path)
-    if enable_pos:
-        attach_spacy_pretokenizer(tokenizer.backend_tokenizer, enable_pos=enable_pos)
+    attach_spacy_pretokenizer(tokenizer.backend_tokenizer, enable_pos=enable_pos)
     return tokenizer

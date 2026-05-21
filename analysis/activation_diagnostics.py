@@ -107,6 +107,7 @@ def alpha_sweep_record(raw_acts, alpha, min_acts):
 
 
 def per_neuron_thresholds(raw_acts, alpha):
+    # Thresholding for raw activations
     return torch.quantile(raw_acts, 1 - float(alpha), dim=0)
 
 
