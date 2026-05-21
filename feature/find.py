@@ -6,7 +6,11 @@ from itertools import chain
 import numpy as np
 
 from feature.batch import batched
-SKIP_TOKENS = {"a", "an", "the", "of", ".", ",", ""}
+
+from spacy.lang.en.stop_words import STOP_WORDS
+import string
+
+SKIP_TOKENS = STOP_WORDS.union(set(string.punctuation)).union({""})
 
 
 def token_should_be_skipped(token_id: int, tokenizer, special_token_ids: set[int]) -> bool:
