@@ -69,7 +69,8 @@ TOKENIZER_SPECIAL_TOKENS = BASE_SPECIAL_TOKENS
 class SpacyPretokenizer:
     def __init__(self,enable_pos=False):
         self.enable_pos = enable_pos
-        self.nlp = spacy.load("en_core_web_sm")
+        disable = [] if enable_pos else ["tagger"]
+        self.nlp = spacy.load("en_core_web_sm", disable=["parser", "ner", "lemmatizer", *disable])
 
     def spacy_split(self, i: int, string: NormalizedString):
         del i # this is unused for our purposes
