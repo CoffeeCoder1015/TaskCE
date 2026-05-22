@@ -6,7 +6,11 @@ from itertools import chain
 import numpy as np
 
 from feature.batch import batched
-SKIP_TOKENS = {"a", "an", "the", "of", ".", ",", ""}
+
+from spacy.lang.en.stop_words import STOP_WORDS
+import string
+
+SKIP_TOKENS = STOP_WORDS.union(set(string.punctuation)).union({""})
 
 
 def token_should_be_skipped(token_id: int, tokenizer, special_token_ids: set[int]) -> bool:
@@ -79,3 +83,18 @@ def top_token_counts(
 ):
     sorted_token_ids = np.argsort(-counts).tolist()
     return filter_token_ids(sorted_token_ids, counts, tokenizer, top_k=top_k)
+
+
+def select_feature_token_ids(
+    counts: np.ndarray,
+    tokenizer,
+    top_k=2_000,
+) -> list[int]:
+    lexical_token_ids = top_token_counts(counts, tokenizer, top_k=top_k)
+    pos_token_ids = [
+        token_id
+        for token_id in tokenizer.additional_special_tokens_ids
+        if (token := tokenizer.decode([token_id]).strip()).startswith("<")
+        and token.endswith(">")
+    ]
+    return lexical_token_ids + pos_token_ids

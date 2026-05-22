@@ -1,13 +1,16 @@
 import os
 
 from datasets import load_dataset
+from transformers import AutoTokenizer
 from analysis import run_ablation, run_ablation_analysis
+from analysis.activation_diagnostics import (
+    save_activation_diagnostics as save_activation_diagnostics_artifacts,
+)
 from analysis.ablation_inference import AblationInferenceEngine, AblationTaskConfig
 from analysis.saving import (
     build_neuron_search_results_dataframe,
     save_neuron_search_results_csv,
 )
-from transformers import AutoTokenizer
 
 from capture.classification_weights import (
     get_classification_weights,
@@ -19,6 +22,7 @@ from capture.postprocessing import threshold, prune_min_acts
 
 from feature.construct import ConstructFeatures, identity_column_selector
 from feature.search import search_all, searchConfig
+from WordTokenizer import get_tokenizer
 
 
 SNLI_LABELS = ("entailment", "neutral", "contradiction")
@@ -76,34 +80,62 @@ def post_process_activations(activation, alpha, min_acts):
     return binarized_activations, kept_bin_activations, kept_neurons
 
 
+def save_activation_diagnostics(captured_results, search_tasks, output_dir):
+    for task in search_tasks:
+        name = task["name"]
+        alpha = task["alpha"]
+        min_acts = task["min_acts"]
+        activations_base = captured_results[name]["base"]
+        activations_finetuned = captured_results[name]["finetuned"]
+        task_output_dir = os.path.join(output_dir, name)
+        binarized_activations = threshold(activations_finetuned.states, alpha=alpha)
+
+        save_activation_diagnostics_artifacts(
+            activations_finetuned.states,
+            activations_base.states,
+            binarized_activations,
+            min_acts,
+            task_output_dir,
+            alpha=alpha,
+        )
+
+
+def select_tokenizer_training_text(columns: list[str]):
+    def selector(example):
+        example["text"] = "\n".join(str(example[column]) for column in columns)
+        return {"text": example["text"]}
+
+    return selector
+
+
 if __name__ == "__main__":
     snli = load_dataset("snli", split="validation")
     vitaminc = load_dataset("tals/vitaminc", split="validation[:10_000]")
 
     model_id = "LiquidAI/LFM2.5-1.2B-Thinking"
-    feature_tokenizer = AutoTokenizer.from_pretrained(model_id)
+    snli_feature_tokenizer = get_tokenizer(
+        "spacy-pos-snli-features",
+        snli.map(select_tokenizer_training_text(["premise", "hypothesis"]))
+    )
+    claim_feature_tokenizer = get_tokenizer(
+        "spacy-pos-claim-features",
+        vitaminc.map(select_tokenizer_training_text(["claim", "evidence"]))
+    )
+    model_tokenizer = AutoTokenizer.from_pretrained(model_id) # Not used, but for comparison
     snli_features = ConstructFeatures(
         snli,
-        feature_tokenizer,
+        snli_feature_tokenizer,
         feature_text_selector=identity_column_selector(["premise", "hypothesis"]),
     )
+    print(snli_features[:30])
     claim_features = ConstructFeatures(
         vitaminc,
-        feature_tokenizer,
+        claim_feature_tokenizer,
         feature_text_selector=identity_column_selector(["claim", "evidence"]),
     )
+    print(claim_features[:30])
 
     lora_dir = "../multitune/output"
-
-    captured_results = Capture(
-        model_id,
-        lora_dir,
-        tasks=[
-            CaptureConfig("snli", snli, format_snli_for_capture),
-            CaptureConfig("claim", vitaminc, format_vitaminc_for_capture),
-        ],
-        layer=-2,
-    )
 
     output_dir = "results"
     search_config = searchConfig(
@@ -115,7 +147,7 @@ if __name__ == "__main__":
     search_tasks = [
         {
             "name": "snli",
-            "alpha": 0.53,
+            "alpha": 0.055,
             "min_acts": 500,
             "features": snli_features,
             "class_token_ids": SNLI_CLASS_TOKEN_IDS,
@@ -125,7 +157,7 @@ if __name__ == "__main__":
         },
         {
             "name": "claim",
-            "alpha": 0.5,
+            "alpha": 0.052,
             "min_acts": 500,
             "features": claim_features,
             "class_token_ids": VITAMINC_CLASS_TOKEN_IDS,
@@ -135,12 +167,24 @@ if __name__ == "__main__":
         },
     ]
 
+    captured_results = Capture(
+        model_id,
+        lora_dir,
+        tasks=[
+            CaptureConfig("snli", snli, format_snli_for_capture),
+            CaptureConfig("claim", vitaminc, format_vitaminc_for_capture),
+        ],
+        layer=-2,
+    )
+    save_activation_diagnostics(captured_results, search_tasks, output_dir)
+
     for task in search_tasks:
         name = task["name"]
         alpha = task["alpha"]
         min_acts = task["min_acts"]
         features = task["features"]
         activations = captured_results[name]["finetuned"]
+        task_output_dir = os.path.join(output_dir, name)
         binarized_activations, kept_activations, kept_neurons = post_process_activations(
             activations,
             alpha,
@@ -151,7 +195,7 @@ if __name__ == "__main__":
         search_results = search_all(
             kept_activations,
             features,
-            num_workers=10,
+            num_workers=8,
             config=search_config,
         )
 
@@ -170,7 +214,6 @@ if __name__ == "__main__":
         save_neuron_search_results_csv(dataframe, output_csv_path)
 
         # Ablations
-        task_output_dir = os.path.join(output_dir, name)
         analysis_result = run_ablation_analysis(
             result_csv_path=output_csv_path,
             output_dir=task_output_dir,

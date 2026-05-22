@@ -22,6 +22,11 @@ from analysis.ablation_analysis import (
     AblationAnalysisResult,
     run_ablation_analysis,
 )
+from analysis.activation_diagnostics import (
+    save_activation_diagnostics,
+    save_binary_activation_count_diagnostics,
+    save_raw_activation_alpha_diagnostics,
+)
 
 __all__ = [
     "AblationAnalysisConfig",
@@ -33,4 +38,7 @@ __all__ = [
     "run_ablation",
     "run_ablation_analysis",
     "save_neuron_search_results_csv",
+    "save_activation_diagnostics",
+    "save_binary_activation_count_diagnostics",
+    "save_raw_activation_alpha_diagnostics",
 ]
