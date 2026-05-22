@@ -11,6 +11,7 @@ from feature.find import (
     SKIP_TOKENS,
     count_model_token_ids,
     filter_token_ids,
+    select_feature_token_ids,
     token_should_be_skipped,
     top_token_counts,
 )
@@ -25,6 +26,7 @@ __all__ = [
     "batched",
     "count_model_token_ids",
     "filter_token_ids",
+    "select_feature_token_ids",
     "token_should_be_skipped",
     "top_token_counts",
 ]
