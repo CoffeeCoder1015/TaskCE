@@ -206,7 +206,7 @@ if __name__ == "__main__":
         search_results = search_all(
             kept_activations,
             features,
-            num_workers=10,
+            num_workers=8,
             config=search_config,
         )
 
