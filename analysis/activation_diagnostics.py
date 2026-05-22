@@ -88,10 +88,14 @@ def save_binary_activation_count_diagnostics(binary_acts, min_acts, output_dir):
         title="Post-binarization nonzero activation counts",
     )
 
+    jaccard_heatmap_path = output_dir / "binarized_activation_jaccard_heatmap.png"
+    plot_jaccard_similarity_heatmap(binary_acts, jaccard_heatmap_path)
+
     return {
         "summary": summary_path,
         "hist_full": full_hist_path,
         "hist_nonzero": nonzero_hist_path,
+        "jaccard_heatmap": jaccard_heatmap_path,
     }
 
 
@@ -309,6 +313,30 @@ def plot_raw_covariance_heatmap(raw_acts, output_path):
     plt.close()
 
 
+def plot_jaccard_similarity_heatmap(binary_acts, output_path):
+    jaccard = jaccard_similarity_matrix(binary_acts)
+    if jaccard.size == 0:
+        plot_empty_heatmap(output_path, "Binarized activation Jaccard similarity heatmap")
+        return
+
+    plt.figure(figsize=(10, 8))
+    image = plt.imshow(
+        jaccard,
+        cmap="viridis",
+        vmin=0.0,
+        vmax=1.0,
+        interpolation="nearest",
+        aspect="auto",
+    )
+    plt.colorbar(image, label="Jaccard similarity / IoU")
+    plt.title("Binarized activation Jaccard similarity heatmap")
+    plt.xlabel("Neuron index")
+    plt.ylabel("Neuron index")
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+
+
 def plot_empty_heatmap(output_path, title):
     plt.figure(figsize=(10, 8))
     plt.text(0.5, 0.5, "No neuron columns", ha="center", va="center")
@@ -344,6 +372,30 @@ def raw_activation_covariance_matrix(raw_acts):
         return np.zeros((values.shape[1], values.shape[1]))
 
     return np.atleast_2d(np.cov(values, rowvar=False))
+
+
+def jaccard_similarity_matrix(binary_acts):
+    binary_acts = to_cpu_tensor(binary_acts)
+    if binary_acts.ndim != 2:
+        raise ValueError(f"expected 2D activation matrix, got shape {tuple(binary_acts.shape)}")
+    binary_acts = binary_acts.numpy()
+
+    num_examples, num_neurons = binary_acts.shape
+    if num_neurons == 0:
+        return np.empty((0, 0))
+    if num_examples == 0:
+        return np.zeros((num_neurons, num_neurons))
+
+    X = binary_acts.astype(np.float32)
+    intersection = X.T @ X
+    sums = X.sum(axis=0)
+    union = sums[:, None] + sums[None, :] - intersection
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        jaccard = np.divide(intersection, union, out=np.zeros_like(intersection), where=union != 0)
+
+    np.fill_diagonal(jaccard, 1.0)
+    return jaccard
 
 
 def adaptive_bins(values, max_bins=DEFAULT_MAX_BINS):

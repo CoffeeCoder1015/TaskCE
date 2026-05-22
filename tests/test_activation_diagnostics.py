@@ -6,6 +6,7 @@ import pytest
 import torch
 
 from analysis.activation_diagnostics import (
+    jaccard_similarity_matrix,
     local_alpha_candidates,
     raw_activation_correlation_matrix,
     raw_activation_covariance_matrix,
@@ -48,6 +49,7 @@ def test_binary_activation_count_diagnostics_writes_metrics_and_plots(tmp_path):
 
     assert os.path.getsize(paths["hist_full"]) > 0
     assert os.path.getsize(paths["hist_nonzero"]) > 0
+    assert os.path.getsize(paths["jaccard_heatmap"]) > 0
 
 
 def test_raw_activation_alpha_diagnostics_sweeps_candidates_and_plots(tmp_path):
@@ -134,6 +136,31 @@ def test_raw_activation_correlation_matrix_normalizes_scale_and_handles_constant
             ]
         ),
     )
+
+
+def test_jaccard_similarity_matrix():
+    binary_acts = torch.tensor(
+        [
+            [1, 1, 0, 0],
+            [1, 1, 0, 0],
+            [0, 1, 0, 1],
+            [0, 0, 0, 1],
+        ],
+        dtype=torch.int8,
+    )
+
+    jaccard = jaccard_similarity_matrix(binary_acts)
+
+    expected = np.array(
+        [
+            [1.0, 2/3, 0.0, 0.0],
+            [2/3, 1.0, 0.0, 0.25],
+            [0.0, 0.0, 1.0, 0.0],
+            [0.0, 0.25, 0.0, 1.0],
+        ]
+    )
+
+    np.testing.assert_allclose(jaccard, expected)
 
 
 def test_raw_activation_diagnostics_handles_zero_neuron_matrices(tmp_path):
