@@ -4,8 +4,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from analysis import run_ablation, run_ablation_analysis
 from analysis.activation_diagnostics import (
-    save_binary_activation_count_diagnostics,
-    save_raw_activation_alpha_diagnostics,
+    save_activation_diagnostics as save_activation_diagnostics_artifacts,
 )
 from analysis.ablation_inference import AblationInferenceEngine, AblationTaskConfig
 from analysis.saving import (
@@ -89,25 +88,15 @@ def save_activation_diagnostics(captured_results, search_tasks, output_dir):
         activations_base = captured_results[name]["base"]
         activations_finetuned = captured_results[name]["finetuned"]
         task_output_dir = os.path.join(output_dir, name)
-        diagnostics_report_path = os.path.join(
-            task_output_dir,
-            "activation_diagnostics_report.txt",
-        )
-
-        save_raw_activation_alpha_diagnostics(
-            activations_finetuned.states,
-            alpha,
-            min_acts,
-            task_output_dir,
-            raw_acts_base=activations_base.states,
-            report_path=diagnostics_report_path,
-        )
         binarized_activations = threshold(activations_finetuned.states, alpha=alpha)
-        save_binary_activation_count_diagnostics(
+
+        save_activation_diagnostics_artifacts(
+            activations_finetuned.states,
+            activations_base.states,
             binarized_activations,
             min_acts,
             task_output_dir,
-            report_path=diagnostics_report_path,
+            alpha=alpha,
         )
 
 
