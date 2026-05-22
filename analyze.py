@@ -86,20 +86,28 @@ def save_activation_diagnostics(captured_results, search_tasks, output_dir):
         name = task["name"]
         alpha = task["alpha"]
         min_acts = task["min_acts"]
-        activations = captured_results[name]["finetuned"]
+        activations_base = captured_results[name]["base"]
+        activations_finetuned = captured_results[name]["finetuned"]
         task_output_dir = os.path.join(output_dir, name)
+        diagnostics_report_path = os.path.join(
+            task_output_dir,
+            "activation_diagnostics_report.txt",
+        )
 
         save_raw_activation_alpha_diagnostics(
-            activations.states,
+            activations_finetuned.states,
             alpha,
             min_acts,
             task_output_dir,
+            raw_acts_base=activations_base.states,
+            report_path=diagnostics_report_path,
         )
-        binarized_activations = threshold(activations.states, alpha=alpha)
+        binarized_activations = threshold(activations_finetuned.states, alpha=alpha)
         save_binary_activation_count_diagnostics(
             binarized_activations,
             min_acts,
             task_output_dir,
+            report_path=diagnostics_report_path,
         )
 
 
