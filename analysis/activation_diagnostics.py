@@ -11,10 +11,48 @@ import matplotlib.pyplot as plt
 
 COUNT_PERCENTILES = (50, 75, 90, 95, 99)
 DEFAULT_MAX_BINS = 200
-DEFAULT_TRACE_NEURONS_PER_PLOT = 1
-DEFAULT_TRACE_SUBPLOT_COLUMNS = 32
 HEATMAP_DPI = 300
-DIAGNOSTICS_REPORT_FILENAME = "activation_diagnostics_report.txt"
+DIAGNOSTICS_REPORT_FILENAME = "activation_diagnostics_report.md"
+
+
+def save_activation_diagnostics(
+    raw_acts_finetuned,
+    raw_acts_base,
+    binary_acts,
+    min_acts,
+    output_dir,
+    *,
+    alpha,
+    alpha_candidates=None,
+    top_k=10,
+):
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    raw_paths, raw_report = raw_activation_diagnostics_artifacts(
+        raw_acts_finetuned,
+        alpha,
+        min_acts,
+        output_dir,
+        raw_acts_base=raw_acts_base,
+        alpha_candidates=alpha_candidates,
+    )
+    binary_paths, binary_report = binary_activation_count_diagnostics_artifacts(
+        binary_acts,
+        min_acts,
+        output_dir,
+    )
+    report_path = output_dir / DIAGNOSTICS_REPORT_FILENAME
+    write_diagnostics_report(
+        report_path,
+        raw_report=raw_report,
+        binary_report=binary_report,
+        top_k=top_k,
+    )
+    return {
+        "diagnostics_report": report_path,
+        **raw_paths,
+        **binary_paths,
+    }
 
 
 def save_raw_activation_alpha_diagnostics(
@@ -25,15 +63,35 @@ def save_raw_activation_alpha_diagnostics(
     *,
     raw_acts_base=None,
     alpha_candidates=None,
-    trace_neurons_per_plot=DEFAULT_TRACE_NEURONS_PER_PLOT,
-    trace_subplot_columns=DEFAULT_TRACE_SUBPLOT_COLUMNS,
     top_k=10,
-    report_path=None,
 ):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    paths, report = raw_activation_diagnostics_artifacts(
+        raw_acts,
+        alpha,
+        min_acts,
+        output_dir,
+        raw_acts_base=raw_acts_base,
+        alpha_candidates=alpha_candidates,
+    )
+    report_path = output_dir / DIAGNOSTICS_REPORT_FILENAME
+    write_diagnostics_report(report_path, raw_report=report, top_k=top_k)
+    return {"diagnostics_report": report_path, **paths}
+
+
+def raw_activation_diagnostics_artifacts(
+    raw_acts,
+    alpha,
+    min_acts,
+    output_dir,
+    *,
+    raw_acts_base=None,
+    alpha_candidates=None,
+):
     if raw_acts_base is None:
         raise ValueError("raw_acts_base is required for base/finetuned diagnostics")
+    output_dir = Path(output_dir)
     raw_acts_finetuned = to_cpu_float_tensor(raw_acts)
     raw_acts_base = to_cpu_float_tensor(raw_acts_base)
     if raw_acts_finetuned.shape != raw_acts_base.shape:
@@ -52,15 +110,6 @@ def save_raw_activation_alpha_diagnostics(
         alpha_sweep_record(raw_acts_finetuned, candidate_alpha, min_acts)
         for candidate_alpha in alpha_candidates
     ]
-    report_path = Path(report_path) if report_path is not None else output_dir / DIAGNOSTICS_REPORT_FILENAME
-
-    traces_path = output_dir / "raw_activation_traces.png"
-    plot_raw_activation_traces(
-        raw_acts_finetuned,
-        traces_path,
-        neurons_per_plot=trace_neurons_per_plot,
-        subplot_columns=trace_subplot_columns,
-    )
 
     correlation_base = raw_activation_correlation_matrix(raw_acts_base)
     correlation_finetuned = raw_activation_correlation_matrix(raw_acts_finetuned)
@@ -113,24 +162,7 @@ def save_raw_activation_alpha_diagnostics(
         "Cosine similarity difference",
     )
 
-    write_raw_diagnostics_report(
-        report_path,
-        min_acts,
-        sweep,
-        (
-            ("Pearson correlation base", correlation_base, False),
-            ("Pearson correlation finetuned", correlation_finetuned, False),
-            ("Pearson correlation difference", correlation_difference, True),
-            ("Cosine similarity base", cosine_base, False),
-            ("Cosine similarity finetuned", cosine_finetuned, False),
-            ("Cosine similarity difference", cosine_difference, True),
-        ),
-        top_k,
-    )
-
-    return {
-        "diagnostics_report": report_path,
-        "activation_traces": traces_path,
+    paths = {
         "correlation_heatmap_base": correlation_base_path,
         "correlation_heatmap_finetuned": correlation_finetuned_path,
         "correlation_heatmap_difference": correlation_difference_path,
@@ -138,13 +170,37 @@ def save_raw_activation_alpha_diagnostics(
         "cosine_similarity_heatmap_finetuned": cosine_finetuned_path,
         "cosine_similarity_heatmap_difference": cosine_difference_path,
     }
+    report = {
+        "min_acts": int(min_acts),
+        "alpha_sweep": sweep,
+        "matrix_sections": (
+            ("Pearson correlation base", correlation_base, False),
+            ("Pearson correlation finetuned", correlation_finetuned, False),
+            ("Pearson correlation difference", correlation_difference, True),
+            ("Cosine similarity base", cosine_base, False),
+            ("Cosine similarity finetuned", cosine_finetuned, False),
+            ("Cosine similarity difference", cosine_difference, True),
+        ),
+    }
+    return paths, report
 
 
-def save_binary_activation_count_diagnostics(binary_acts, min_acts, output_dir, *, report_path=None):
+def save_binary_activation_count_diagnostics(binary_acts, min_acts, output_dir):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    paths, report = binary_activation_count_diagnostics_artifacts(
+        binary_acts,
+        min_acts,
+        output_dir,
+    )
+    report_path = output_dir / DIAGNOSTICS_REPORT_FILENAME
+    write_diagnostics_report(report_path, binary_report=report)
+    return {"diagnostics_report": report_path, **paths}
+
+
+def binary_activation_count_diagnostics_artifacts(binary_acts, min_acts, output_dir):
+    output_dir = Path(output_dir)
     counts = activation_counts(binary_acts)
-    report_path = Path(report_path) if report_path is not None else output_dir / DIAGNOSTICS_REPORT_FILENAME
     summary = count_summary(counts, min_acts)
 
     full_hist_path = output_dir / "activation_counts_hist_full.png"
@@ -166,14 +222,14 @@ def save_binary_activation_count_diagnostics(binary_acts, min_acts, output_dir, 
 
     jaccard_heatmap_path = output_dir / "binarized_activation_jaccard_heatmap.png"
     plot_jaccard_similarity_heatmap(binary_acts, jaccard_heatmap_path)
-    append_binary_diagnostics_report(report_path, summary)
 
-    return {
-        "diagnostics_report": report_path,
+    paths = {
         "hist_full": full_hist_path,
         "hist_nonzero": nonzero_hist_path,
         "jaccard_heatmap": jaccard_heatmap_path,
     }
+    report = {"summary": summary}
+    return paths, report
 
 
 def local_alpha_candidates(alpha):
@@ -278,65 +334,6 @@ def plot_activation_count_histogram(counts, min_acts, output_path, title):
     plt.savefig(output_path)
     plt.close()
 
-
-def plot_raw_activation_traces(
-    raw_acts,
-    output_path,
-    *,
-    neurons_per_plot=DEFAULT_TRACE_NEURONS_PER_PLOT,
-    subplot_columns=DEFAULT_TRACE_SUBPLOT_COLUMNS,
-):
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    values = raw_acts.numpy()
-    total_neurons = values.shape[1]
-    if neurons_per_plot <= 0:
-        raise ValueError("neurons_per_plot must be positive")
-    if subplot_columns <= 0:
-        raise ValueError("subplot_columns must be positive")
-
-    if total_neurons == 0:
-        plt.figure(figsize=(10, 6))
-        plt.text(0.5, 0.5, "No raw activations", ha="center", va="center")
-        plt.title("Raw neuron activations over examples")
-        plt.xlabel("Example index")
-        plt.ylabel("Raw activation")
-        plt.tight_layout()
-        plt.savefig(output_path)
-        plt.close()
-        return output_path
-
-    x = np.arange(values.shape[0])
-    chunks = list(range(0, total_neurons, neurons_per_plot))
-    subplot_count = len(chunks)
-    columns = min(subplot_columns, subplot_count)
-    rows = int(np.ceil(subplot_count / columns))
-    fig, axes = plt.subplots(
-        rows,
-        columns,
-        figsize=(columns * 5, rows * 3),
-        squeeze=False,
-        sharex=True,
-    )
-    axes_flat = axes.flatten()
-
-    for axis, start in zip(axes_flat, chunks, strict=False):
-        stop = min(start + neurons_per_plot, total_neurons)
-        for neuron_index in range(start, stop):
-            axis.plot(x, values[:, neuron_index], linewidth=0.45, alpha=0.45)
-        axis.set_title(f"Neurons {start}-{stop - 1}", fontsize=9)
-        axis.grid(True, linestyle="--", alpha=0.5)
-
-    for axis in axes_flat[subplot_count:]:
-        axis.axis("off")
-
-    fig.suptitle("Raw neuron activations over examples", fontsize=14)
-    fig.supxlabel("Example index")
-    fig.supylabel("Raw activation")
-    fig.tight_layout()
-    fig.savefig(output_path)
-    plt.close(fig)
-    return output_path
 
 
 def plot_similarity_heatmap(matrix, output_path, title, colorbar_label):
@@ -496,51 +493,184 @@ def format_pairs(pairs):
     ]
 
 
-def write_raw_diagnostics_report(report_path, min_acts, sweep, matrix_sections, top_k):
-    lines = [
-        "ACTIVATION DIAGNOSTICS REPORT",
-        "",
-        "RAW ACTIVATION ALPHA SWEEP",
-        f"min_acts: {int(min_acts)}",
+def format_sweep_table(sweep_records):
+    header = [
+        "| Alpha | Zero Count | Zero % | Below Min Count | Below Min % | Kept Count | Kept % | p50 | p75 | p90 | p95 | p99 | Max |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |"
     ]
-    for record in sweep:
-        lines.extend(format_count_summary(record, prefix=f"alpha={record['alpha']:.6g}"))
+    rows = []
+    for r in sweep_records:
+        pcts = r["activation_count_percentiles"]
+        row_cols = [
+            f"{r['alpha']:.6g}",
+            f"{r['zero_activation_count']}",
+            f"{r['zero_activation_percent']:.6f}",
+            f"{r['below_min_acts_count']}",
+            f"{r['below_min_acts_percent']:.6f}",
+            f"{r['kept_count']}",
+            f"{r['kept_percent']:.6f}",
+            f"{pcts['p50']:.6f}",
+            f"{pcts['p75']:.6f}",
+            f"{pcts['p90']:.6f}",
+            f"{pcts['p95']:.6f}",
+            f"{pcts['p99']:.6f}",
+            f"{pcts['max']:.6f}"
+        ]
+        rows.append("| " + " | ".join(row_cols) + " |")
+    return header + rows
 
-    lines.extend(["", "TOP NEURON PAIRS"])
+
+def format_summary_table(summary):
+    pcts = summary["activation_count_percentiles"]
+    rows = [
+        "| Metric | Value |",
+        "| :--- | :--- |",
+        f"| Zero Activation Count | {summary['zero_activation_count']} |",
+        f"| Zero Activation % | {summary['zero_activation_percent']:.6f} |",
+        f"| Below Min Acts Count | {summary['below_min_acts_count']} |",
+        f"| Below Min Acts % | {summary['below_min_acts_percent']:.6f} |",
+        f"| Kept Count | {summary['kept_count']} |",
+        f"| Kept % | {summary['kept_percent']:.6f} |",
+        f"| p50 | {pcts['p50']:.6f} |",
+        f"| p75 | {pcts['p75']:.6f} |",
+        f"| p90 | {pcts['p90']:.6f} |",
+        f"| p95 | {pcts['p95']:.6f} |",
+        f"| p99 | {pcts['p99']:.6f} |",
+        f"| Max | {pcts['max']:.6f} |",
+    ]
+    return rows
+
+
+def _write_similarity_group(lines, keyword, title, pairs_heading, matrix_sections, top_k):
+    lines.extend([title, "", pairs_heading, ""])
     for name, matrix, is_difference in matrix_sections:
-        lines.extend(["", name])
-        lines.extend(pair_lines(matrix, top_k=top_k, is_difference=is_difference))
+        if keyword in name:
+            lines.extend([f"**{name}**", "```"])
+            lines.extend(pair_lines(matrix, top_k=top_k, is_difference=is_difference))
+            lines.extend(["```", ""])
+
+
+def write_diagnostics_report(report_path, *, raw_report=None, binary_report=None, top_k=10):
+    lines = [
+        "# Activation Diagnostics Report",
+        "",
+    ]
+    if raw_report is not None:
+        lines.extend(raw_alpha_sweep_section(raw_report))
+    if binary_report is not None:
+        lines.extend(binary_count_section(binary_report))
+    if raw_report is not None:
+        lines.extend(
+            similarity_correlation_section(
+                raw_report,
+                top_k,
+            )
+        )
+    if raw_report is not None or binary_report is not None:
+        lines.extend(
+            visualizations_section(
+                include_raw=raw_report is not None,
+                include_binary=binary_report is not None,
+            )
+        )
 
     write_text_report(report_path, lines, mode="w")
 
 
-def append_binary_diagnostics_report(report_path, summary):
+def raw_alpha_sweep_section(raw_report):
     lines = [
+        "## RAW ACTIVATION ALPHA SWEEP",
         "",
-        "POST-BINARIZATION ACTIVATION COUNT SUMMARY",
+        f"min_acts: {raw_report['min_acts']}",
+        "",
     ]
-    lines.extend(format_count_summary(summary))
-    write_text_report(report_path, lines, mode="a")
-
-
-def format_count_summary(summary, prefix=None):
-    lines = []
-    if prefix is not None:
-        lines.append(prefix)
-    lines.extend(
-        [
-            f"  zero_activation_count: {summary['zero_activation_count']}",
-            f"  zero_activation_percent: {summary['zero_activation_percent']:.6f}",
-            f"  below_min_acts_count: {summary['below_min_acts_count']}",
-            f"  below_min_acts_percent: {summary['below_min_acts_percent']:.6f}",
-            f"  kept_count: {summary['kept_count']}",
-            f"  kept_percent: {summary['kept_percent']:.6f}",
-            "  activation_count_percentiles:",
-        ]
-    )
-    for name, value in summary["activation_count_percentiles"].items():
-        lines.append(f"    {name}: {value:.6f}")
+    lines.extend(format_sweep_table(raw_report["alpha_sweep"]))
+    lines.append("")
     return lines
+
+
+def binary_count_section(binary_report):
+    lines = [
+        "## POST-BINARIZATION ACTIVATION COUNT SUMMARY",
+        "",
+    ]
+    lines.extend(format_summary_table(binary_report["summary"]))
+    lines.append("")
+    return lines
+
+
+def similarity_correlation_section(raw_report, top_k):
+    lines = [
+        "## SIMILARITY & CORRELATION ANALYSIS",
+        "",
+    ]
+    matrix_sections = raw_report["matrix_sections"]
+
+    _write_similarity_group(
+        lines, "Pearson",
+        "### Pearson Correlation",
+        "#### Top Pearson Correlation Neuron Pairs",
+        matrix_sections, top_k,
+    )
+
+    _write_similarity_group(
+        lines, "Cosine",
+        "### Cosine Similarity",
+        "#### Top Cosine Similarity Neuron Pairs",
+        matrix_sections, top_k,
+    )
+    return lines
+
+
+def visualizations_section(*, include_raw, include_binary):
+    lines = ["## VISUALIZATIONS", ""]
+    if include_binary:
+        lines.extend([
+            "### Post-Binarization Activation Count Histograms",
+            "",
+            "| Full Histogram | Nonzero Histogram |",
+            "| :---: | :---: |",
+            "| ![Post-Binarization Activation Counts](./activation_counts_hist_full.png) | ![Post-Binarization Nonzero Activation Counts](./activation_counts_hist_nonzero.png) |",
+            "",
+        ])
+        lines.extend(jaccard_visualization_section())
+    if include_raw:
+        lines.extend(pearson_heatmap_section())
+        lines.extend(cosine_heatmap_section())
+    return lines
+
+
+def jaccard_visualization_section():
+    return [
+        "### Binarized Activation Jaccard Similarity",
+        "",
+        "#### Jaccard Similarity / IoU Heatmap",
+        "",
+        "![Jaccard Similarity / IoU Heatmap](./binarized_activation_jaccard_heatmap.png)",
+        "",
+    ]
+
+
+def pearson_heatmap_section():
+    return [
+        "### Pearson Correlation Heatmaps",
+        "",
+        "| Base Heatmap | Finetuned Heatmap | Difference Heatmap |",
+        "| :---: | :---: | :---: |",
+        "| ![Pearson Correlation Base](./raw_activation_correlation_heatmap_base.png) | ![Pearson Correlation Finetuned](./raw_activation_correlation_heatmap_finetuned.png) | ![Pearson Correlation Difference](./raw_activation_correlation_heatmap_difference.png) |",
+        "",
+    ]
+
+
+def cosine_heatmap_section():
+    return [
+        "### Cosine Similarity Heatmaps",
+        "",
+        "| Base Heatmap | Finetuned Heatmap | Difference Heatmap |",
+        "| :---: | :---: | :---: |",
+        "| ![Cosine Similarity Base](./raw_activation_cosine_similarity_heatmap_base.png) | ![Cosine Similarity Finetuned](./raw_activation_cosine_similarity_heatmap_finetuned.png) | ![Cosine Similarity Difference](./raw_activation_cosine_similarity_heatmap_difference.png) |",
+        "",
+    ]
 
 
 def write_text_report(path, lines, mode):
