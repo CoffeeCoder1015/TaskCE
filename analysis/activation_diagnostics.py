@@ -14,6 +14,7 @@ COUNT_PERCENTILES = (50, 75, 90, 95, 99)
 DEFAULT_MAX_BINS = 200
 DEFAULT_TRACE_NEURONS_PER_PLOT = 1
 DEFAULT_TRACE_SUBPLOT_COLUMNS = 32
+HEATMAP_DPI = 300
 
 
 def save_raw_activation_alpha_diagnostics(
@@ -275,14 +276,14 @@ def plot_raw_correlation_heatmap(raw_acts, output_path):
         vmin=-1,
         vmax=1,
         interpolation="nearest",
-        aspect="auto",
+        aspect="equal",
     )
     plt.colorbar(image, label="Pearson correlation")
     plt.title("Raw activation correlation heatmap")
     plt.xlabel("Neuron index")
     plt.ylabel("Neuron index")
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=HEATMAP_DPI)
     plt.close()
 
 
@@ -302,14 +303,14 @@ def plot_raw_covariance_heatmap(raw_acts, output_path):
         vmin=-color_limit,
         vmax=color_limit,
         interpolation="nearest",
-        aspect="auto",
+        aspect="equal",
     )
     plt.colorbar(image, label="Covariance")
     plt.title("Raw activation covariance heatmap")
     plt.xlabel("Neuron index")
     plt.ylabel("Neuron index")
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=HEATMAP_DPI)
     plt.close()
 
 
@@ -326,14 +327,14 @@ def plot_jaccard_similarity_heatmap(binary_acts, output_path):
         vmin=0.0,
         vmax=1.0,
         interpolation="nearest",
-        aspect="auto",
+        aspect="equal",
     )
     plt.colorbar(image, label="Jaccard similarity / IoU")
     plt.title("Binarized activation Jaccard similarity heatmap")
     plt.xlabel("Neuron index")
     plt.ylabel("Neuron index")
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=HEATMAP_DPI)
     plt.close()
 
 
@@ -344,7 +345,7 @@ def plot_empty_heatmap(output_path, title):
     plt.xlabel("Neuron index")
     plt.ylabel("Neuron index")
     plt.tight_layout()
-    plt.savefig(output_path)
+    plt.savefig(output_path, dpi=HEATMAP_DPI)
     plt.close()
 
 
