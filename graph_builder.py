@@ -427,13 +427,15 @@ def save_graph_report(report, graph, output_dir, name):
         "report": graph_dir / f"{name}_cluster_report.md",
     }
 
-    plt.figure(figsize=(12, 10))
+    plt.figure(figsize=(24, 20))
     assert graph.number_of_nodes() > 0, "cannot save an empty graph"
     assert graph.number_of_edges() > 0, "cannot save a graph with no edges"
 
     positions = nx.spring_layout(
         graph,
         weight="strength",
+        k=2.0 / math.sqrt(graph.number_of_nodes()),
+        scale=3.0,
         seed=report["options"]["community_seed"],
     )
     positive_edges = [
