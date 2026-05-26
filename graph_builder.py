@@ -30,6 +30,7 @@ def report_graph(
     formulas,
     *,
     metric_name="graph",
+    relu_sparsify=False,
     local_top_percentile=DEFAULT_LOCAL_TOP_PERCENTILE,
     min_neighbors=DEFAULT_MIN_NEIGHBORS,
     k_core_start=DEFAULT_K_CORE_START,
@@ -43,6 +44,7 @@ def report_graph(
         f"expected square adjacency matrix, got shape {matrix.shape}"
     )
     assert np.isfinite(matrix).all(), "adjacency matrix must not contain NaN or inf"
+    relu_sparsify = bool(relu_sparsify)
     assert 0 < float(local_top_percentile) <= 1, "local_top_percentile must be in (0, 1]"
     assert 1 <= int(min_neighbors) < matrix.shape[0], (
         "min_neighbors must be at least 1 and smaller than neuron count"
@@ -87,9 +89,12 @@ def report_graph(
         candidates = []
         for column_index, weight in enumerate(row):
             weight = float(weight)
-            if column_index == row_index or not np.isfinite(weight) or weight == 0.0:
+            if column_index == row_index or not np.isfinite(weight):
                 continue
-            candidates.append((int(column_index), abs(weight)))
+            strength = max(weight, 0.0) if relu_sparsify else abs(weight)
+            if strength == 0.0:
+                continue
+            candidates.append((int(column_index), strength))
 
         if not candidates:
             continue
@@ -197,6 +202,7 @@ def report_graph(
     report = {
         "metric_name": str(metric_name),
         "options": {
+            "relu_sparsify": bool(relu_sparsify),
             "local_top_percentile": float(local_top_percentile),
             "min_neighbors": int(min_neighbors),
             "k_core_start": int(k_core_start),
@@ -233,6 +239,7 @@ def report_graph(
 def build_project_graph_reports(
     results_path,
     *,
+    relu_sparsify=True,
     local_top_percentile=DEFAULT_LOCAL_TOP_PERCENTILE,
     min_neighbors=DEFAULT_MIN_NEIGHBORS,
     k_core_start=DEFAULT_K_CORE_START,
@@ -263,6 +270,7 @@ def build_project_graph_reports(
             pearson_matrix,
             formulas,
             metric_name="pearson",
+            relu_sparsify=relu_sparsify,
             local_top_percentile=local_top_percentile,
             min_neighbors=min_neighbors,
             k_core_start=k_core_start,
@@ -280,6 +288,7 @@ def build_project_graph_reports(
             cosine_matrix,
             formulas,
             metric_name="cosine",
+            relu_sparsify=relu_sparsify,
             local_top_percentile=local_top_percentile,
             min_neighbors=min_neighbors,
             k_core_start=k_core_start,
@@ -303,6 +312,7 @@ def build_project_graph_reports(
             base_pearson_matrix,
             formulas,
             metric_name="base_pearson",
+            relu_sparsify=relu_sparsify,
             local_top_percentile=local_top_percentile,
             min_neighbors=min_neighbors,
             k_core_start=k_core_start,
@@ -320,6 +330,7 @@ def build_project_graph_reports(
             base_cosine_matrix,
             formulas,
             metric_name="base_cosine",
+            relu_sparsify=relu_sparsify,
             local_top_percentile=local_top_percentile,
             min_neighbors=min_neighbors,
             k_core_start=k_core_start,
@@ -502,9 +513,14 @@ def parse_args():
         default="results",
         help="Results dir or captured_results.pt path. Defaults to results.",
     )
+    parser.add_argument(
+        "--relu-sparsify",
+        action="store_true",
+        help="Drop non-positive weights before selecting strongest neighbors.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    build_project_graph_reports(args.results_path)
+    build_project_graph_reports(args.results_path, relu_sparsify=args.relu_sparsify)
