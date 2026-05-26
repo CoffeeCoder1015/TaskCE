@@ -1,3 +1,4 @@
+import warnings
 from pathlib import Path
 
 import networkx as nx
@@ -103,22 +104,72 @@ def test_report_graph_fails_fast_when_formula_metadata_does_not_cover_matrix():
         report_graph(adjacency, incomplete_formulas, min_neighbors=1)
 
 
-def test_report_graph_fails_fast_when_sparsification_creates_no_edges():
+def test_report_graph_allows_isolated_neurons_from_sparsification():
     adjacency = [
-        [1.0, 0.0, 0.0],
-        [0.0, 1.0, 0.0],
-        [0.0, 0.0, 1.0],
+        [1.0, 0.9, -0.8, 0.0],
+        [0.9, 1.0, -0.7, 0.0],
+        [-0.8, -0.7, 1.0, 0.0],
+        [0.0, 0.0, 0.0, 1.0],
     ]
-    complete_formulas = pd.DataFrame(
+
+    report, graph = report_graph(
+        adjacency,
+        formulas(),
+        local_top_percentile=0.25,
+        min_neighbors=2,
+        k_core_start=2,
+    )
+
+    assert set(graph.nodes) == {0, 1, 2}
+    assert report["k_core"]["core_numbers"][3] == 0
+
+
+def test_report_graph_fails_fast_when_formula_columns_are_malformed():
+    adjacency = [
+        [1.0, 0.9],
+        [0.9, 1.0],
+    ]
+    malformed_formulas = pd.DataFrame(
         [
-            {"neuron": 0, "formula": "tok:A", "iou": 0.9},
-            {"neuron": 1, "formula": "tok:B", "iou": 0.8},
-            {"neuron": 2, "formula": "tok:C", "iou": 0.7},
+            {"neuron": 0, "formula": "tok:A"},
+            {"neuron": 1, "formula": "tok:B"},
         ]
     )
 
-    with pytest.raises(AssertionError, match="has no nonzero finite adjacency candidates"):
-        report_graph(adjacency, complete_formulas, min_neighbors=1)
+    with pytest.raises(AssertionError, match="formula rows missing required columns"):
+        report_graph(adjacency, malformed_formulas, min_neighbors=1, k_core_start=1)
+
+
+def test_report_graph_fails_fast_when_formula_rows_contain_nulls():
+    adjacency = [
+        [1.0, 0.9],
+        [0.9, 1.0],
+    ]
+    null_formulas = pd.DataFrame(
+        [
+            {"neuron": 0, "formula": "tok:A", "iou": 0.9},
+            {"neuron": 1, "formula": None, "iou": 0.8},
+        ]
+    )
+
+    with pytest.raises(AssertionError, match="formula rows must not contain null values"):
+        report_graph(adjacency, null_formulas, min_neighbors=1, k_core_start=1)
+
+
+def test_report_graph_fails_fast_when_graph_settings_are_invalid():
+    adjacency = [
+        [1.0, 0.9],
+        [0.9, 1.0],
+    ]
+
+    with pytest.raises(AssertionError, match="local_top_percentile"):
+        report_graph(adjacency, formulas().iloc[:2], local_top_percentile=0)
+
+    with pytest.raises(AssertionError, match="min_neighbors"):
+        report_graph(adjacency, formulas().iloc[:2], min_neighbors=2)
+
+    with pytest.raises(AssertionError, match="k_core_start"):
+        report_graph(adjacency, formulas().iloc[:2], min_neighbors=1, k_core_start=0)
 
 
 def test_report_graph_fails_fast_when_requested_k_core_is_empty():
@@ -217,7 +268,7 @@ def test_project_runner_calls_report_graph_separately_for_pearson_and_cosine(tmp
     assert not (Path(tmp_path) / "snli" / "pearson_cluster_report.md").exists()
 
 
-def test_project_runner_fails_fast_when_a_captured_task_has_no_formula_csv(tmp_path):
+def test_project_runner_warns_and_skips_tasks_without_formula_csv(tmp_path):
     captured_results = {
         "missing_csv": {
             "finetuned": CapturedResults(
@@ -229,5 +280,9 @@ def test_project_runner_fails_fast_when_a_captured_task_has_no_formula_csv(tmp_p
     }
     save_captured_activations(captured_results, tmp_path)
 
-    with pytest.raises(AssertionError, match="missing formula CSV"):
-        build_project_graph_reports(tmp_path)
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        written = build_project_graph_reports(tmp_path)
+
+    assert written == {}
+    assert any("missing_csv" in str(w.message) for w in caught)
