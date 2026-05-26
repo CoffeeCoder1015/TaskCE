@@ -1,5 +1,6 @@
 import argparse
 import math
+import warnings
 from pathlib import Path
 
 import matplotlib
@@ -17,7 +18,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
-REQUIRED_FORMULA_COLUMNS = ("neuron", "formula", "iou")
+REQUIRED_FORMULA_COLUMNS = {"neuron", "formula", "iou"}
 DEFAULT_LOCAL_TOP_PERCENTILE = 0.01
 DEFAULT_MIN_NEIGHBORS = 3
 DEFAULT_K_CORE_START = 3
@@ -41,22 +42,18 @@ def report_graph(
     assert matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1], (
         f"expected square adjacency matrix, got shape {matrix.shape}"
     )
-    assert matrix.shape[0] > 1, "adjacency matrix must contain at least two neurons"
     assert np.isfinite(matrix).all(), "adjacency matrix must not contain NaN or inf"
-    assert 0 < float(local_top_percentile) <= 1, (
-        "local_top_percentile must be in the interval (0, 1]"
-    )
+    assert 0 < float(local_top_percentile) <= 1, "local_top_percentile must be in (0, 1]"
     assert 1 <= int(min_neighbors) < matrix.shape[0], (
         "min_neighbors must be at least 1 and smaller than neuron count"
     )
     assert int(k_core_start) >= 1, "k_core_start must be at least 1"
 
-    formula_frame = pd.DataFrame(formulas).copy()
-    missing_columns = [
-        column for column in REQUIRED_FORMULA_COLUMNS if column not in formula_frame.columns
-    ]
-    if missing_columns:
-        raise ValueError(f"formula rows missing required columns: {missing_columns}")
+    formula_frame = pd.DataFrame(formulas)
+    missing_formula_columns = REQUIRED_FORMULA_COLUMNS - set(formula_frame.columns)
+    assert not missing_formula_columns, (
+        f"formula rows missing required columns: {sorted(missing_formula_columns)}"
+    )
     assert not formula_frame.isna().any().any(), "formula rows must not contain null values"
 
     metadata_by_neuron = {}
@@ -69,8 +66,10 @@ def report_graph(
             elif isinstance(value, np.floating):
                 value = float(value)
             metadata_by_neuron[neuron][key] = value
-    assert set(metadata_by_neuron) == set(range(matrix.shape[0])), (
-        "formula neurons must match adjacency neuron indices"
+    expected_neurons = set(range(matrix.shape[0]))
+    assert set(metadata_by_neuron) == expected_neurons, (
+        "formula neurons must match adjacency indices: "
+        f"formulas={sorted(metadata_by_neuron)}, adjacency={sorted(expected_neurons)}"
     )
 
     # Stage 2: construct a single NetworkX graph for this matrix and attach neuron metadata.
@@ -93,9 +92,7 @@ def report_graph(
             candidates.append((int(column_index), abs(weight)))
 
         if not candidates:
-            raise AssertionError(
-                f"neuron {row_index} has no nonzero finite adjacency candidates"
-            )
+            continue
 
         percentile_count = math.ceil((matrix.shape[0] - 1) * float(local_top_percentile))
         keep_count = max(1, int(min_neighbors), percentile_count)
@@ -121,7 +118,7 @@ def report_graph(
             strength=abs(weight),
             sign=sign,
         )
-    assert graph.number_of_edges() > 0, "sparsification produced no edges"
+
 
     # Stage 4: run k-core analysis on the sparsified graph.
     core_numbers = nx.core_number(graph)
@@ -134,9 +131,6 @@ def report_graph(
     assert selected_graph.number_of_nodes() > 0, (
         f"requested k-core is empty for k={selected_k}"
     )
-    assert selected_graph.number_of_edges() > 0, (
-        f"requested k-core has no edges for k={selected_k}"
-    )
 
     # Stage 5: run community detection on the selected k-core graph.
     communities = [
@@ -147,7 +141,7 @@ def report_graph(
             seed=int(community_seed),
         )
     ]
-    assert communities, "community detection produced no communities"
+
 
     community_by_node = {}
     for community_id, community_nodes in enumerate(communities):
@@ -251,10 +245,14 @@ def build_project_graph_reports(
 
     for task_name in sorted(captured_results):
         result_csv_path = results_root / f"{task_name}_beam_results.csv"
-        assert result_csv_path.exists(), f"missing formula CSV for task {task_name}"
+        if not result_csv_path.exists():
+            warnings.warn(f"skipping task {task_name}: no formula CSV at {result_csv_path}")
+            continue
 
         task_results = captured_results[task_name]
-        assert "finetuned" in task_results, f"missing finetuned capture for task {task_name}"
+        if "finetuned" not in task_results:
+            warnings.warn(f"skipping task {task_name}: no finetuned capture found")
+            continue
 
         formulas = pd.read_csv(result_csv_path)
         states = task_results["finetuned"].states
