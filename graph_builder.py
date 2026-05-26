@@ -545,4 +545,4 @@ def parse_args():
 
 if __name__ == "__main__":
     args = parse_args()
-    build_project_graph_reports(args.results_path, relu_sparsify=args.relu_sparsify)
+    build_project_graph_reports(args.results_path, relu_sparsify=args.relu)
