@@ -227,6 +227,18 @@ def test_save_graph_report_uses_name_and_graph_subdirectory(tmp_path):
 def test_project_runner_calls_report_graph_separately_for_pearson_and_cosine(tmp_path):
     captured_results = {
         "snli": {
+            "base": CapturedResults(
+                states=torch.tensor(
+                    [
+                        [4.0, 1.0, -1.0],
+                        [3.0, 2.0, -2.0],
+                        [2.0, 3.0, -3.0],
+                        [1.0, 4.0, -4.0],
+                    ]
+                ),
+                labels=["entailment"] * 4,
+                layer="model.layers.1",
+            ),
             "finetuned": CapturedResults(
                 states=torch.tensor(
                     [
@@ -257,7 +269,18 @@ def test_project_runner_calls_report_graph_separately_for_pearson_and_cosine(tmp
         k_core_start=2,
     )
 
-    assert sorted(written) == ["snli/cosine", "snli/pearson"]
+    assert sorted(written) == [
+        "snli/base_cosine",
+        "snli/base_pearson",
+        "snli/cosine",
+        "snli/pearson",
+    ]
+    assert written["snli/base_pearson"]["report"] == (
+        Path(tmp_path) / "snli" / "graph" / "base_pearson_cluster_report.md"
+    )
+    assert written["snli/base_cosine"]["report"] == (
+        Path(tmp_path) / "snli" / "graph" / "base_cosine_cluster_report.md"
+    )
     assert written["snli/pearson"]["report"] == (
         Path(tmp_path) / "snli" / "graph" / "pearson_cluster_report.md"
     )
