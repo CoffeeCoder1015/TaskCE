@@ -16,8 +16,7 @@ from capture.classification_weights import (
     get_classification_weights,
     latest_task_lora_checkpoint,
 )
-from capture.captureConfig import CaptureConfig
-from capture.capturer import Capture
+from capture import Capture, CaptureConfig, save_captured_activations
 from capture.postprocessing import threshold, prune_min_acts
 
 from feature.construct import ConstructFeatures, identity_column_selector
@@ -176,6 +175,7 @@ if __name__ == "__main__":
         ],
         layer=-2,
     )
+    save_captured_activations(captured_results, output_dir)
     save_activation_diagnostics(captured_results, search_tasks, output_dir)
 
     for task in search_tasks:

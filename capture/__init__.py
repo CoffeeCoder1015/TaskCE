@@ -7,5 +7,15 @@ neuron-feature matrices used by downstream search and analysis steps.
 """
 from .captureConfig import CaptureConfig
 from .capturer import Capture, CapturedResults
+from .saving import (
+    load_captured_activations,
+    save_captured_activations,
+)
 
-__all__ = ["Capture", "CaptureConfig", "CapturedResults"]
+__all__ = [
+    "Capture",
+    "CaptureConfig",
+    "CapturedResults",
+    "load_captured_activations",
+    "save_captured_activations",
+]
