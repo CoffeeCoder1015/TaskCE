@@ -23,6 +23,7 @@ DEFAULT_LOCAL_TOP_PERCENTILE = 0.01
 DEFAULT_MIN_NEIGHBORS = 3
 DEFAULT_K_CORE_START = 3
 DEFAULT_COMMUNITY_SEED = 0
+HUB_REPORT_LIMIT = 10
 
 
 def report_graph(
@@ -153,6 +154,19 @@ def report_graph(
         for node in community_nodes:
             community_by_node[node] = int(community_id)
     nx.set_node_attributes(selected_graph, community_by_node, "community")
+    degree_by_node = dict(selected_graph.degree())
+    weighted_degree_by_node = {
+        int(node): float(
+            sum(
+                data.get("strength", 0.0)
+                for _, _, data in selected_graph.edges(node, data=True)
+            )
+        )
+        for node in selected_graph.nodes
+    }
+    shell_histogram = {}
+    for core_number in core_numbers.values():
+        shell_histogram[int(core_number)] = shell_histogram.get(int(core_number), 0) + 1
 
     # Stage 6: shape the graph analysis into a report dictionary.
     community_reports = []
@@ -163,23 +177,28 @@ def report_graph(
         for node in ordered_nodes:
             attrs = dict(selected_graph.nodes[node])
             attrs["neuron"] = int(node)
+            attrs["degree"] = int(degree_by_node[node])
+            attrs["weighted_degree"] = float(weighted_degree_by_node[node])
             members.append(attrs)
         summary_nodes = sorted(
-            ordered_nodes,
+            [
+                node
+                for node in ordered_nodes
+                if "PRUNED" not in str(selected_graph.nodes[node].get("formula", ""))
+            ],
             key=lambda node: (
-                -community_graph.degree(node),
-                -sum(
-                    data.get("strength", 0.0)
-                    for _, _, data in community_graph.edges(node, data=True)
-                ),
+                -weighted_degree_by_node[node],
+                -degree_by_node[node],
                 node,
             ),
-        )[:10]
-        summary_members = []
+        )[:HUB_REPORT_LIMIT]
+        top_hubs = []
         for node in summary_nodes:
             attrs = dict(selected_graph.nodes[node])
             attrs["neuron"] = int(node)
-            summary_members.append(attrs)
+            attrs["degree"] = int(degree_by_node[node])
+            attrs["weighted_degree"] = float(weighted_degree_by_node[node])
+            top_hubs.append(attrs)
 
         strongest_edges = []
         for first, second, data in sorted(
@@ -211,7 +230,7 @@ def report_graph(
                     if data.get("sign") == "negative"
                 ),
                 "members": members,
-                "summary_members": summary_members,
+                "top_hubs": top_hubs,
                 "strongest_edges": strongest_edges,
             }
         )
@@ -247,7 +266,15 @@ def report_graph(
             "selected_k": int(selected_k),
             "max_core_number": int(max_core_number),
             "core_numbers": {int(node): int(value) for node, value in core_numbers.items()},
+            "shell_histogram": {
+                int(shell): int(count)
+                for shell, count in sorted(shell_histogram.items())
+            },
         },
+        "degree_distribution": distribution_summary(degree_by_node.values()),
+        "weighted_degree_distribution": distribution_summary(
+            weighted_degree_by_node.values()
+        ),
         "communities": community_reports,
     }
     return report, selected_graph
@@ -364,6 +391,9 @@ def build_project_graph_reports(
 
 
 def render_report_markdown(report, *, member_key="members"):
+    member_heading = (
+        "Top Non-Pruned Hubs" if member_key == "top_hubs" else "Members"
+    )
     lines = [
         f"# Neuron Graph Cluster Report: {report['metric_name']}",
         "",
@@ -378,7 +408,7 @@ def render_report_markdown(report, *, member_key="members"):
     lines.extend(
         [
             "",
-            "## K-Core Results",
+            "## Core Metadata",
             "",
             "| Metric | Value |",
             "| :--- | :--- |",
@@ -387,6 +417,18 @@ def render_report_markdown(report, *, member_key="members"):
             f"| Max Core Number | {report['k_core']['max_core_number']} |",
         ]
     )
+
+    lines.extend(["", "### Shell Histogram", ""])
+    lines.append("| Core Number | Nodes |")
+    lines.append("| :--- | :--- |")
+    for core_number, count in report["k_core"]["shell_histogram"].items():
+        lines.append(f"| {core_number} | {count} |")
+
+    lines.extend(["", "## Degree Distribution", ""])
+    lines.extend(render_distribution_table(report["degree_distribution"]))
+
+    lines.extend(["", "## Weighted Degree Distribution", ""])
+    lines.extend(render_distribution_table(report["weighted_degree_distribution"]))
 
     lines.extend(["", "## Communities", ""])
     assert report["communities"], "report must contain communities"
@@ -407,28 +449,42 @@ def render_report_markdown(report, *, member_key="members"):
         )
 
         members = community[member_key]
-        member_columns = sorted({key for member in members for key in member})
-        preferred = ["neuron", "formula", "iou", "core_number", "community"]
-        weight_columns = [
-            column for column in member_columns if column.startswith("weight_")
-        ]
-        columns = [
-            *[column for column in preferred if column in member_columns],
-            *weight_columns,
-            *[
-                column
-                for column in member_columns
-                if column not in {*preferred, *weight_columns}
-            ],
-        ]
-        lines.append("| " + " | ".join(columns) + " |")
-        lines.append("| " + " | ".join(":---" for _ in columns) + " |")
-        for member in members:
-            lines.append(
-                "| "
-                + " | ".join(markdown_cell(member.get(column, "")) for column in columns)
-                + " |"
-            )
+        lines.extend([f"#### {member_heading}", ""])
+        if not members:
+            lines.extend(["No non-pruned hubs.", ""])
+        else:
+            member_columns = sorted({key for member in members for key in member})
+            preferred = [
+                "neuron",
+                "formula",
+                "iou",
+                "degree",
+                "weighted_degree",
+                "core_number",
+                "community",
+            ]
+            weight_columns = [
+                column for column in member_columns if column.startswith("weight_")
+            ]
+            columns = [
+                *[column for column in preferred if column in member_columns],
+                *weight_columns,
+                *[
+                    column
+                    for column in member_columns
+                    if column not in {*preferred, *weight_columns}
+                ],
+            ]
+            lines.append("| " + " | ".join(columns) + " |")
+            lines.append("| " + " | ".join(":---" for _ in columns) + " |")
+            for member in members:
+                lines.append(
+                    "| "
+                    + " | ".join(
+                        markdown_cell(member.get(column, "")) for column in columns
+                    )
+                    + " |"
+                )
 
         lines.extend(["", "#### Strongest Internal Edges", ""])
         if not community["strongest_edges"]:
@@ -441,6 +497,40 @@ def render_report_markdown(report, *, member_key="members"):
         lines.append("")
 
     return "\n".join(lines) + "\n"
+
+
+def render_distribution_table(summary):
+    lines = ["| Metric | Value |", "| :--- | :--- |"]
+    for key in ["min", "p25", "median", "p75", "max", "mean"]:
+        lines.append(f"| {key} | {summary[key]:.6f} |")
+    return lines
+
+
+def distribution_summary(values):
+    values = np.asarray(list(values), dtype=float)
+    if values.size == 0:
+        return {
+            "min": 0.0,
+            "p25": 0.0,
+            "median": 0.0,
+            "p75": 0.0,
+            "max": 0.0,
+            "mean": 0.0,
+        }
+    return {
+        "min": float(np.min(values)),
+        "p25": float(np.percentile(values, 25)),
+        "median": float(np.percentile(values, 50)),
+        "p75": float(np.percentile(values, 75)),
+        "max": float(np.max(values)),
+        "mean": float(np.mean(values)),
+    }
+
+
+def markdown_cell(value):
+    if isinstance(value, float):
+        return f"{value:.6f}"
+    return str(value).replace("|", "\\|").replace("\n", " ")
 
 
 def save_graph_report(report, graph, output_dir, name):
@@ -515,14 +605,10 @@ def save_graph_report(report, graph, output_dir, name):
         encoding="utf-8",
     )
     paths["summary_report"].write_text(
-        render_report_markdown(report, member_key="summary_members"),
+        render_report_markdown(report, member_key="top_hubs"),
         encoding="utf-8",
     )
     return paths
-
-
-def markdown_cell(value):
-    return str(value).replace("|", "\\|").replace("\n", " ")
 
 
 def parse_args():
