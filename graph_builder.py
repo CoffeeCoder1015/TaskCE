@@ -292,6 +292,46 @@ def build_project_graph_reports(
             name="cosine",
         )
 
+        if "base" not in task_results:
+            warnings.warn(f"skipping task {task_name}: no base capture found")
+            continue
+
+        base_states = task_results["base"].states
+
+        base_pearson_matrix = raw_activation_correlation_matrix(base_states)
+        base_pearson_report, base_pearson_graph = report_graph(
+            base_pearson_matrix,
+            formulas,
+            metric_name="base_pearson",
+            local_top_percentile=local_top_percentile,
+            min_neighbors=min_neighbors,
+            k_core_start=k_core_start,
+            community_seed=community_seed,
+        )
+        written_paths[f"{task_name}/base_pearson"] = save_graph_report(
+            base_pearson_report,
+            base_pearson_graph,
+            output_dir,
+            name="base_pearson",
+        )
+
+        base_cosine_matrix = raw_activation_cosine_similarity_matrix(base_states)
+        base_cosine_report, base_cosine_graph = report_graph(
+            base_cosine_matrix,
+            formulas,
+            metric_name="base_cosine",
+            local_top_percentile=local_top_percentile,
+            min_neighbors=min_neighbors,
+            k_core_start=k_core_start,
+            community_seed=community_seed,
+        )
+        written_paths[f"{task_name}/base_cosine"] = save_graph_report(
+            base_cosine_report,
+            base_cosine_graph,
+            output_dir,
+            name="base_cosine",
+        )
+
     return written_paths
 
 
