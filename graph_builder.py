@@ -535,6 +535,7 @@ def markdown_cell(value):
 
 def save_graph_report(report, graph, output_dir, name):
     import networkx as nx
+    from matplotlib.patches import Patch
 
     graph_dir = Path(output_dir) / "graph"
     graph_dir.mkdir(parents=True, exist_ok=True)
@@ -561,12 +562,19 @@ def save_graph_report(report, graph, output_dir, name):
     negative_edges = [
         edge for edge in graph.edges if graph.edges[edge]["sign"] == "negative"
     ]
-    node_colors = [graph.nodes[node]["community"] for node in graph.nodes]
+    community_ids = sorted({int(graph.nodes[node]["community"]) for node in graph.nodes})
+    community_colors = {
+        community_id: plt.cm.tab20(index % 20)
+        for index, community_id in enumerate(community_ids)
+    }
+    node_colors = [
+        community_colors[int(graph.nodes[node]["community"])]
+        for node in graph.nodes
+    ]
     nx.draw_networkx_nodes(
         graph,
         positions,
         node_color=node_colors,
-        cmap=plt.cm.tab20,
         node_size=450,
         edgecolors="black",
         linewidths=0.6,
@@ -593,6 +601,21 @@ def save_graph_report(report, graph, output_dir, name):
         positions,
         labels={node: str(node) for node in graph.nodes},
         font_size=8,
+    )
+    legend_handles = [
+        Patch(
+            facecolor=community_colors[community_id],
+            edgecolor="black",
+            label=f"Community {community_id}",
+        )
+        for community_id in community_ids
+    ]
+    plt.legend(
+        handles=legend_handles,
+        loc="center left",
+        bbox_to_anchor=(1.01, 0.5),
+        frameon=True,
+        fontsize=10,
     )
     plt.title(f"{report['metric_name']} neuron graph (k-core {report['k_core']['selected_k']})")
     plt.axis("off")
