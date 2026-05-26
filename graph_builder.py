@@ -164,6 +164,22 @@ def report_graph(
             attrs = dict(selected_graph.nodes[node])
             attrs["neuron"] = int(node)
             members.append(attrs)
+        summary_nodes = sorted(
+            ordered_nodes,
+            key=lambda node: (
+                -community_graph.degree(node),
+                -sum(
+                    data.get("strength", 0.0)
+                    for _, _, data in community_graph.edges(node, data=True)
+                ),
+                node,
+            ),
+        )[:10]
+        summary_members = []
+        for node in summary_nodes:
+            attrs = dict(selected_graph.nodes[node])
+            attrs["neuron"] = int(node)
+            summary_members.append(attrs)
 
         strongest_edges = []
         for first, second, data in sorted(
@@ -195,6 +211,7 @@ def report_graph(
                     if data.get("sign") == "negative"
                 ),
                 "members": members,
+                "summary_members": summary_members,
                 "strongest_edges": strongest_edges,
             }
         )
@@ -239,7 +256,7 @@ def report_graph(
 def build_project_graph_reports(
     results_path,
     *,
-    relu_sparsify=True,
+    relu_sparsify=False,
     local_top_percentile=DEFAULT_LOCAL_TOP_PERCENTILE,
     min_neighbors=DEFAULT_MIN_NEIGHBORS,
     k_core_start=DEFAULT_K_CORE_START,
@@ -346,7 +363,7 @@ def build_project_graph_reports(
     return written_paths
 
 
-def render_report_markdown(report):
+def render_report_markdown(report, *, member_key="members"):
     lines = [
         f"# Neuron Graph Cluster Report: {report['metric_name']}",
         "",
@@ -389,9 +406,8 @@ def render_report_markdown(report):
             ]
         )
 
-        member_columns = sorted(
-            {key for member in community["members"] for key in member}
-        )
+        members = community[member_key]
+        member_columns = sorted({key for member in members for key in member})
         preferred = ["neuron", "formula", "iou", "core_number", "community"]
         weight_columns = [
             column for column in member_columns if column.startswith("weight_")
@@ -407,7 +423,7 @@ def render_report_markdown(report):
         ]
         lines.append("| " + " | ".join(columns) + " |")
         lines.append("| " + " | ".join(":---" for _ in columns) + " |")
-        for member in community["members"]:
+        for member in members:
             lines.append(
                 "| "
                 + " | ".join(markdown_cell(member.get(column, "")) for column in columns)
@@ -434,8 +450,8 @@ def save_graph_report(report, graph, output_dir, name):
     graph_dir.mkdir(parents=True, exist_ok=True)
     paths = {
         "png": graph_dir / f"{name}_neuron_graph.png",
-        "graphml": graph_dir / f"{name}_neuron_graph.graphml",
-        "report": graph_dir / f"{name}_cluster_report.md",
+        "full_report": graph_dir / f"{name}_cluster_report_full.md",
+        "summary_report": graph_dir / f"{name}_cluster_report_summary.md",
     }
 
     plt.figure(figsize=(24, 20))
@@ -494,8 +510,14 @@ def save_graph_report(report, graph, output_dir, name):
     plt.savefig(paths["png"], dpi=250)
     plt.close()
 
-    nx.write_graphml(graph, paths["graphml"])
-    paths["report"].write_text(render_report_markdown(report), encoding="utf-8")
+    paths["full_report"].write_text(
+        render_report_markdown(report, member_key="members"),
+        encoding="utf-8",
+    )
+    paths["summary_report"].write_text(
+        render_report_markdown(report, member_key="summary_members"),
+        encoding="utf-8",
+    )
     return paths
 
 
@@ -514,7 +536,7 @@ def parse_args():
         help="Results dir or captured_results.pt path. Defaults to results.",
     )
     parser.add_argument(
-        "--relu-sparsify",
+        "--relu",
         action="store_true",
         help="Drop non-positive weights before selecting strongest neighbors.",
     )
