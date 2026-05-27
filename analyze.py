@@ -213,6 +213,14 @@ if __name__ == "__main__":
         output_csv_path = os.path.join(output_dir, f"{name}_beam_results.csv")
         save_neuron_search_results_csv(dataframe, output_csv_path)
 
+    print("--- Search complete, entering ablation stage ---")
+
+    for task in search_tasks:
+        name = task["name"]
+        weight_column_names = tuple( f"weight_{label.replace(' ', '_')}" for label in task["labels"])
+        task_output_dir = os.path.join(output_dir, name)
+        output_csv_path = os.path.join(output_dir, f"{name}_beam_results.csv")
+
         # Ablations
         analysis_result = run_ablation_analysis(
             result_csv_path=output_csv_path,
