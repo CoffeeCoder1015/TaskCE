@@ -448,6 +448,8 @@ def markdown_cell(value):
 
 
 def markdown_table(dataframe, columns):
+    if not columns:
+        return ["No data."]
     lines = [
         "| " + " | ".join(columns) + " |",
         "| " + " | ".join(":---" for _ in columns) + " |",
@@ -530,7 +532,11 @@ def render_summary_report(
         ]
         if column in report_df.columns
     ]
-    atomic_columns = ["signed_atomic", "frequency", "neuron_presence"]
+    atomic_columns = [
+        column
+        for column in ["signed_atomic", "frequency", "neuron_presence"]
+        if column in community_atomic_df.columns
+    ]
     hub_columns = [
         "rank",
         "node",
@@ -555,11 +561,15 @@ def render_summary_report(
         "min_negative_weighted_degree",
     ]
     union_columns = [
-        "core_number",
-        "rank",
-        "signed_atomic",
-        "neuron_presence",
-        "frequency",
+        column
+        for column in [
+            "core_number",
+            "rank",
+            "signed_atomic",
+            "neuron_presence",
+            "frequency",
+        ]
+        if column in k_core_union_df.columns
     ]
     lines = ["# Cluster Report Summary", ""]
 
@@ -574,16 +584,20 @@ def render_summary_report(
             ],
             ascending=[False, False, False, True],
         ).head(5)
-        top_atomics = community_atomic_df[
-            community_atomic_df["community"] == community_id
-        ].head(10)
+        top_atomics = community_atomic_df
+        if "community" in community_atomic_df.columns:
+            top_atomics = community_atomic_df[
+                community_atomic_df["community"] == community_id
+            ].head(10)
         community_hubs = hubs_df[hubs_df["community"] == community_id]
         related_stats = k_core_stats_df[
             k_core_stats_df["core_number"].isin(core_numbers)
         ]
-        related_union = k_core_union_df[
-            k_core_union_df["core_number"].isin(core_numbers)
-        ].groupby("core_number", as_index=False).head(5)
+        related_union = k_core_union_df
+        if "core_number" in k_core_union_df.columns:
+            related_union = k_core_union_df[
+                k_core_union_df["core_number"].isin(core_numbers)
+            ].groupby("core_number", as_index=False).head(5)
 
         lines.extend([f"## Community {community_id}", ""])
         lines.extend(["### Top Formulas", ""])
@@ -677,5 +691,55 @@ def save_reports(
     paths["k_core_full_report"].write_text(
         render_k_core_full_report(k_core_df, k_core_stats_df, k_core_union_df),
         encoding="utf-8",
+    )
+    return paths
+
+
+def save_graph_outputs(
+    graph,
+    k_core_graph,
+    output_dir,
+    name,
+    *,
+    title,
+    seed,
+    communities_df,
+    formula_dataframe,
+    degrees_df,
+    k_core_df,
+    hubs_df,
+    k_core_stats_df,
+    community_atomic_df=None,
+    k_core_union_df=None,
+):
+    graph_dir = Path(output_dir) / "graph"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+    community_atomic_df = (
+        pd.DataFrame() if community_atomic_df is None else community_atomic_df
+    )
+    k_core_union_df = pd.DataFrame() if k_core_union_df is None else k_core_union_df
+    paths = {
+        "png": graph_dir / f"{name}_neuron_graph.png",
+        "k_core_png": graph_dir / f"{name}_k_core_graph.png",
+        **save_reports(
+            graph_dir,
+            name,
+            communities_df,
+            formula_dataframe,
+            degrees_df,
+            k_core_df,
+            community_atomic_df,
+            hubs_df,
+            k_core_stats_df,
+            k_core_union_df,
+        ),
+    }
+    save_graph_plot(k_core_graph, communities_df, paths["png"], title=title, seed=seed)
+    save_k_core_plot(
+        graph,
+        k_core_df,
+        paths["k_core_png"],
+        title=f"{title} k-core",
+        seed=seed,
     )
     return paths
