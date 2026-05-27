@@ -10,6 +10,11 @@ from sympy.logic.boolalg import Not as SymNot
 from sympy.parsing.sympy_parser import parse_expr
 
 
+ATOMIC_PATTERN_TEXT = r"[A-Za-z_][\w-]*:(?:<[^>]+>|[^\s()]+)"
+ATOMIC_PATTERN = re.compile(ATOMIC_PATTERN_TEXT)
+NEGATED_ATOMIC_PATTERN = re.compile(rf"\(\s*NOT\s+({ATOMIC_PATTERN_TEXT})\s*\)")
+
+
 def zero_diag(adj_matrix):
     matrix = np.asarray(adj_matrix, dtype=float).copy()
     np.fill_diagonal(matrix, 0.0)
@@ -59,6 +64,18 @@ def local_top_percent_union(adj_matrix, percent):
     return np.where(union_mask, matrix, 0.0)
 
 
+def signed_atomic_counts(formula):
+    counts = Counter()
+    formula_text = str(formula)
+
+    for atomic in NEGATED_ATOMIC_PATTERN.findall(formula_text):
+        counts[f"NOT {atomic}"] += 1
+
+    formula_text = NEGATED_ATOMIC_PATTERN.sub(" ", formula_text)
+    counts.update(ATOMIC_PATTERN.findall(formula_text))
+    return dict(counts)
+
+
 def build_graph(adj_matrix, sparsify_fn, formula_dataframe):
     matrix = np.asarray(adj_matrix, dtype=float)
     
@@ -69,18 +86,72 @@ def build_graph(adj_matrix, sparsify_fn, formula_dataframe):
     node_metadata = {}
     
     for row in formula_dataframe.iloc:
-        node_metadata[row.neuron] = {"formula":row.formula,"iou":row.iou}
+        node_metadata[row.neuron] = {
+            "formula": row.formula,
+            "iou": row.iou,
+            "signed_atomic_counts": signed_atomic_counts(row.formula),
+        }
 
     nx.set_node_attributes(graph,node_metadata)
     
     return graph
 
 
-def analyze_k_core(graph):
-    core_numbers = nx.core_number(graph)
-    return pd.DataFrame(
-        {"node": node, "core_number": core_number}
-        for node, core_number in core_numbers.items()
+def analyze_k_core(graph, k_range=range(2, 8)):
+    node_rows = []
+    stat_rows = []
+    for k in k_range:
+        k_core_graph = nx.k_core(graph, k=k).copy()
+        node_rows.extend(
+            {"k": k, "node": node}
+            for node in sorted(k_core_graph.nodes)
+        )
+        degrees_df = analyze_degrees(k_core_graph)
+        stat_rows.append(
+            {
+                "k": k,
+                "node_count": k_core_graph.number_of_nodes(),
+                "edge_count": k_core_graph.number_of_edges(),
+                "avg_degree": degrees_df["degree"].mean(),
+                "max_degree": degrees_df["degree"].max(),
+                "avg_positive_edge_count": degrees_df["positive_edge_count"].mean(),
+                "max_positive_edge_count": degrees_df["positive_edge_count"].max(),
+                "avg_negative_edge_count": degrees_df["negative_edge_count"].mean(),
+                "max_negative_edge_count": degrees_df["negative_edge_count"].max(),
+                "avg_positive_weighted_degree": degrees_df[
+                    "positive_weighted_degree"
+                ].mean(),
+                "max_positive_weighted_degree": degrees_df[
+                    "positive_weighted_degree"
+                ].max(),
+                "avg_negative_weighted_degree": degrees_df[
+                    "negative_weighted_degree"
+                ].mean(),
+                "min_negative_weighted_degree": degrees_df[
+                    "negative_weighted_degree"
+                ].min(),
+            }
+        )
+    return (
+        pd.DataFrame(node_rows, columns=["k", "node"]),
+        pd.DataFrame(
+            stat_rows,
+            columns=[
+                "k",
+                "node_count",
+                "edge_count",
+                "avg_degree",
+                "max_degree",
+                "avg_positive_edge_count",
+                "max_positive_edge_count",
+                "avg_negative_edge_count",
+                "max_negative_edge_count",
+                "avg_positive_weighted_degree",
+                "max_positive_weighted_degree",
+                "avg_negative_weighted_degree",
+                "min_negative_weighted_degree",
+            ],
+        ),
     )
 
 
@@ -140,20 +211,6 @@ def analyze_communities(graph, method="louvain", seed=0, backend="cugraph"):
     )
 
 
-def tokenizer_atomic_symbols(tokenizer, labels):
-    vocab_tokens = sorted(tokenizer.get_vocab())
-    atomics = [f"{label}:{token}" for label in labels for token in vocab_tokens]
-    placeholders = {
-        atomic: f"atomic_{index}"
-        for index, atomic in enumerate(sorted(atomics, key=len, reverse=True))
-    }
-    symbols = {
-        placeholder: Symbol(atomic)
-        for atomic, placeholder in placeholders.items()
-    }
-    return placeholders, symbols
-
-
 def sympy_formula_text(formula, placeholders):
     rewritten = str(formula)
     for atomic, placeholder in placeholders.items():
@@ -178,36 +235,28 @@ def signed_atomics(expr, negated=False):
     ]
 
 
-def analyze_atomic_frequencies(formula_dataframe, tokenizer, labels):
-    placeholders, symbols = tokenizer_atomic_symbols(tokenizer, labels)
+def analyze_community_atomic_frequencies(graph, communities_df):
     rows = []
-
-    for formula_row in formula_dataframe.to_dict("records"):
-        expression = parse_expr(
-            sympy_formula_text(formula_row["formula"], placeholders),
-            local_dict=symbols,
-            evaluate=False,
-        )
-        counts = Counter(signed_atomics(expression))
-        for (atomic, signed_atomic), count in counts.items():
+    for row in communities_df.itertuples(index=False):
+        for signed_atomic, count in graph.nodes[row.node][
+            "signed_atomic_counts"
+        ].items():
             rows.append(
                 {
-                    "node": formula_row["neuron"],
-                    "atomic": atomic,
+                    "community": row.community,
+                    "node": row.node,
                     "signed_atomic": signed_atomic,
-                    "count": int(count),
+                    "count": count,
                 }
             )
 
-    return pd.DataFrame(rows, columns=["node", "atomic", "signed_atomic", "count"])
-
-
-def analyze_community_atomic_frequencies(communities_df, atomic_df):
-    joined = communities_df.merge(atomic_df, on="node")
-    grouped = (
-        joined.groupby(["community", "signed_atomic"], as_index=False)
+    atomic_counts = pd.DataFrame(
+        rows,
+        columns=["community", "node", "signed_atomic", "count"],
+    )
+    return (
+        atomic_counts.groupby(["community", "signed_atomic"], as_index=False)
         .agg(
-            atomic=("atomic", "first"),
             frequency=("count", "sum"),
             neuron_presence=("node", "nunique"),
         )
@@ -215,34 +264,88 @@ def analyze_community_atomic_frequencies(communities_df, atomic_df):
             ["community", "frequency", "neuron_presence", "signed_atomic"],
             ascending=[True, False, False, True],
         )
+        .reset_index(drop=True)
     )
-    return grouped[
-        ["community", "atomic", "signed_atomic", "frequency", "neuron_presence"]
-    ].reset_index(drop=True)
+
+
+def analyze_k_core_atomic_frequencies(graph, k_core_nodes_df):
+    rows = []
+    for row in k_core_nodes_df.itertuples(index=False):
+        for signed_atomic, count in graph.nodes[row.node][
+            "signed_atomic_counts"
+        ].items():
+            rows.append(
+                {
+                    "k": row.k,
+                    "node": row.node,
+                    "signed_atomic": signed_atomic,
+                    "count": count,
+                }
+            )
+
+    atomic_counts = pd.DataFrame(
+        rows,
+        columns=["k", "node", "signed_atomic", "count"],
+    )
+    k_core_atomics = (
+        atomic_counts.groupby(["k", "signed_atomic"], as_index=False)
+        .agg(
+            frequency=("count", "sum"),
+            neuron_presence=("node", "nunique"),
+        )
+        .sort_values(
+            ["k", "neuron_presence", "frequency", "signed_atomic"],
+            ascending=[True, False, False, True],
+        )
+        .reset_index(drop=True)
+    )
+    k_core_atomics["rank"] = k_core_atomics.groupby("k").cumcount() + 1
+    return k_core_atomics[
+        ["k", "rank", "signed_atomic", "frequency", "neuron_presence"]
+    ]
 
 
 def analyze_hubs(degrees_df, communities_df, limit=5):
-    hubs = (
-        communities_df.merge(degrees_df, on="node")
-        .sort_values(
+    community_degrees = communities_df.merge(degrees_df, on="node")
+    positive_hubs = (
+        community_degrees.sort_values(
             [
                 "community",
                 "positive_weighted_degree",
-                "negative_weighted_degree",
                 "positive_edge_count",
+                "node",
+            ],
+            ascending=[True, False, False, True],
+        )
+        .groupby("community", as_index=False)
+        .head(limit)
+        .copy()
+    )
+    positive_hubs["hub_type"] = "positive"
+    positive_hubs["rank"] = positive_hubs.groupby("community").cumcount() + 1
+
+    negative_hubs = (
+        community_degrees.sort_values(
+            [
+                "community",
+                "negative_weighted_degree",
                 "negative_edge_count",
                 "node",
             ],
-            ascending=[True, False, False, False, True, True],
+            ascending=[True, True, False, True],
         )
         .groupby("community", as_index=False)
-        .head(int(limit))
+        .head(limit)
         .copy()
     )
-    hubs["rank"] = hubs.groupby("community").cumcount() + 1
+    negative_hubs["hub_type"] = "negative"
+    negative_hubs["rank"] = negative_hubs.groupby("community").cumcount() + 1
+
+    hubs = pd.concat([positive_hubs, negative_hubs], ignore_index=True)
     return hubs[
         [
             "community",
+            "hub_type",
             "rank",
             "node",
             "degree",
@@ -252,57 +355,6 @@ def analyze_hubs(degrees_df, communities_df, limit=5):
             "negative_weighted_degree",
         ]
     ].reset_index(drop=True)
-
-
-def analyze_k_core_union(k_core_df, atomic_df):
-    joined = k_core_df.merge(atomic_df, on="node")
-    union = (
-        joined.groupby(["core_number", "signed_atomic"], as_index=False)
-        .agg(
-            atomic=("atomic", "first"),
-            frequency=("count", "sum"),
-            neuron_presence=("node", "nunique"),
-        )
-        .sort_values(
-            ["core_number", "neuron_presence", "frequency", "signed_atomic"],
-            ascending=[True, False, False, True],
-        )
-        .copy()
-    )
-    union["rank"] = union.groupby("core_number").cumcount() + 1
-    return union[
-        [
-            "core_number",
-            "rank",
-            "atomic",
-            "signed_atomic",
-            "frequency",
-            "neuron_presence",
-        ]
-    ].reset_index(drop=True)
-
-
-def analyze_k_core_stats(k_core_df, degrees_df):
-    joined = k_core_df.merge(degrees_df, on="node")
-    return (
-        joined.groupby("core_number", as_index=False)
-        .agg(
-            node_count=("node", "nunique"),
-            avg_degree=("degree", "mean"),
-            max_degree=("degree", "max"),
-            avg_positive_edge_count=("positive_edge_count", "mean"),
-            max_positive_edge_count=("positive_edge_count", "max"),
-            avg_negative_edge_count=("negative_edge_count", "mean"),
-            max_negative_edge_count=("negative_edge_count", "max"),
-            avg_positive_weighted_degree=("positive_weighted_degree", "mean"),
-            max_positive_weighted_degree=("positive_weighted_degree", "max"),
-            avg_negative_weighted_degree=("negative_weighted_degree", "mean"),
-            min_negative_weighted_degree=("negative_weighted_degree", "min"),
-        )
-        .sort_values("core_number")
-        .reset_index(drop=True)
-    )
-
 
 def save_graph_plot(graph, communities_df, output_path, *, title, seed=0):
     import matplotlib
@@ -366,7 +418,7 @@ def save_graph_plot(graph, communities_df, output_path, *, title, seed=0):
     plt.close()
 
 
-def save_k_core_plot(graph, k_core_df, output_path, *, title, seed=0):
+def save_k_core_plot(graph, k_core_nodes_df, output_path, *, title, seed=0):
     import matplotlib
 
     matplotlib.use("Agg")
@@ -375,15 +427,13 @@ def save_k_core_plot(graph, k_core_df, output_path, *, title, seed=0):
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    core_by_node = k_core_df.set_index("node")["core_number"].to_dict()
-    core_numbers = sorted(k_core_df["core_number"].unique())
+    k_values = sorted(k_core_nodes_df["k"].unique())
     color_map = plt.colormaps["viridis"]
     colors = {
-        core_number: color_map(index / max(len(core_numbers) - 1, 1))
-        for index, core_number in enumerate(core_numbers)
+        k: color_map(index / max(len(k_values) - 1, 1))
+        for index, k in enumerate(k_values)
     }
     positions = nx.spring_layout(graph, weight="weight", seed=seed)
-    node_colors = [colors[core_by_node[node]] for node in graph.nodes]
 
     plt.figure(figsize=(24, 20))
     nx.draw_networkx_edges(
@@ -396,11 +446,22 @@ def save_k_core_plot(graph, k_core_df, output_path, *, title, seed=0):
     nx.draw_networkx_nodes(
         graph,
         positions,
-        node_color=node_colors,
-        node_size=420,
-        edgecolors="black",
+        node_color="#f2f2f2",
+        node_size=300,
+        edgecolors="#555555",
         linewidths=0.6,
     )
+    for index, k in enumerate(k_values):
+        k_nodes = k_core_nodes_df[k_core_nodes_df["k"] == k]["node"].tolist()
+        nx.draw_networkx_nodes(
+            graph,
+            positions,
+            nodelist=k_nodes,
+            node_color="none",
+            node_size=460 + index * 150,
+            edgecolors=colors[k],
+            linewidths=2.0,
+        )
     nx.draw_networkx_labels(
         graph,
         positions,
@@ -410,11 +471,11 @@ def save_k_core_plot(graph, k_core_df, output_path, *, title, seed=0):
     plt.legend(
         handles=[
             Patch(
-                facecolor=colors[core_number],
-                edgecolor="black",
-                label=f"Core {core_number}",
+                facecolor="none",
+                edgecolor=colors[k],
+                label=f"k={k}",
             )
-            for core_number in core_numbers
+            for k in k_values
         ],
         loc="center left",
         bbox_to_anchor=(1.01, 0.5),
@@ -428,12 +489,11 @@ def save_k_core_plot(graph, k_core_df, output_path, *, title, seed=0):
     plt.close()
 
 
-def neuron_report_frame(communities_df, formula_dataframe, degrees_df, k_core_df):
+def neuron_report_frame(communities_df, formula_dataframe, degrees_df):
     formula_df = formula_dataframe.rename(columns={"neuron": "node"})
     return (
         communities_df.merge(formula_df, on="node")
         .merge(degrees_df, on="node")
-        .merge(k_core_df, on="node")
         .sort_values(["community", "node"])
         .reset_index(drop=True)
     )
@@ -448,7 +508,7 @@ def markdown_cell(value):
 
 
 def markdown_table(dataframe, columns):
-    if not columns:
+    if not columns or dataframe.empty:
         return ["No data."]
     lines = [
         "| " + " | ".join(columns) + " |",
@@ -463,12 +523,11 @@ def markdown_table(dataframe, columns):
     return lines
 
 
-def render_full_report(communities_df, formula_dataframe, degrees_df, k_core_df):
+def render_full_report(communities_df, formula_dataframe, degrees_df):
     report_df = neuron_report_frame(
         communities_df,
         formula_dataframe,
         degrees_df,
-        k_core_df,
     )
     base_columns = [
         "community",
@@ -481,7 +540,6 @@ def render_full_report(communities_df, formula_dataframe, degrees_df, k_core_df)
         "negative_edge_count",
         "positive_weighted_degree",
         "negative_weighted_degree",
-        "core_number",
     ]
     columns = [column for column in base_columns if column in report_df.columns]
     lines = ["# Cluster Report Full", ""]
@@ -505,17 +563,14 @@ def render_summary_report(
     communities_df,
     formula_dataframe,
     degrees_df,
-    k_core_df,
     community_atomic_df,
     hubs_df,
     k_core_stats_df,
-    k_core_union_df,
 ):
     report_df = neuron_report_frame(
         communities_df,
         formula_dataframe,
         degrees_df,
-        k_core_df,
     )
     formula_columns = [
         column
@@ -528,7 +583,6 @@ def render_summary_report(
             "negative_edge_count",
             "positive_weighted_degree",
             "negative_weighted_degree",
-            "core_number",
         ]
         if column in report_df.columns
     ]
@@ -538,6 +592,7 @@ def render_summary_report(
         if column in community_atomic_df.columns
     ]
     hub_columns = [
+        "hub_type",
         "rank",
         "node",
         "degree",
@@ -547,8 +602,9 @@ def render_summary_report(
         "negative_weighted_degree",
     ]
     stat_columns = [
-        "core_number",
+        "k",
         "node_count",
+        "edge_count",
         "avg_degree",
         "max_degree",
         "avg_positive_edge_count",
@@ -560,21 +616,9 @@ def render_summary_report(
         "avg_negative_weighted_degree",
         "min_negative_weighted_degree",
     ]
-    union_columns = [
-        column
-        for column in [
-            "core_number",
-            "rank",
-            "signed_atomic",
-            "neuron_presence",
-            "frequency",
-        ]
-        if column in k_core_union_df.columns
-    ]
     lines = ["# Cluster Report Summary", ""]
 
     for community_id, community_df in report_df.groupby("community", sort=True):
-        core_numbers = sorted(community_df["core_number"].unique())
         top_formulas = community_df.sort_values(
             [
                 "positive_weighted_degree",
@@ -590,14 +634,6 @@ def render_summary_report(
                 community_atomic_df["community"] == community_id
             ].head(10)
         community_hubs = hubs_df[hubs_df["community"] == community_id]
-        related_stats = k_core_stats_df[
-            k_core_stats_df["core_number"].isin(core_numbers)
-        ]
-        related_union = k_core_union_df
-        if "core_number" in k_core_union_df.columns:
-            related_union = k_core_union_df[
-                k_core_union_df["core_number"].isin(core_numbers)
-            ].groupby("core_number", as_index=False).head(5)
 
         lines.extend([f"## Community {community_id}", ""])
         lines.extend(["### Top Formulas", ""])
@@ -606,19 +642,21 @@ def render_summary_report(
         lines.extend(markdown_table(top_atomics, atomic_columns))
         lines.extend(["", "### Hubs", ""])
         lines.extend(markdown_table(community_hubs, hub_columns))
-        lines.extend(["", "### Related K-Core Stats", ""])
-        lines.extend(markdown_table(related_stats, stat_columns))
-        lines.extend(["", "### Related K-Core Shared Atomics", ""])
-        lines.extend(markdown_table(related_union, union_columns))
         lines.append("")
+
+    lines.extend(["## K-Core Sweep", ""])
+    lines.extend(markdown_table(k_core_stats_df, stat_columns))
+    lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
 
 
-def render_k_core_full_report(k_core_df, k_core_stats_df, k_core_union_df):
-    node_columns = ["node", "core_number"]
+def render_k_core_full_report(k_core_nodes_df, k_core_stats_df, k_core_atomic_df):
+    node_columns = ["node"]
     stat_columns = [
+        "k",
         "node_count",
+        "edge_count",
         "avg_degree",
         "max_degree",
         "avg_positive_edge_count",
@@ -633,113 +671,18 @@ def render_k_core_full_report(k_core_df, k_core_stats_df, k_core_union_df):
     union_columns = ["rank", "signed_atomic", "neuron_presence", "frequency"]
     lines = ["# K-Core Report Full", ""]
 
-    for core_number, core_df in k_core_df.sort_values(["core_number", "node"]).groupby(
-        "core_number",
-        sort=True,
-    ):
-        core_stats = k_core_stats_df[k_core_stats_df["core_number"] == core_number]
-        core_union = k_core_union_df[k_core_union_df["core_number"] == core_number]
+    for k in k_core_stats_df.sort_values("k")["k"]:
+        core_df = k_core_nodes_df[k_core_nodes_df["k"] == k].sort_values("node")
+        core_stats = k_core_stats_df[k_core_stats_df["k"] == k]
+        core_atomics = k_core_atomic_df[k_core_atomic_df["k"] == k]
 
-        lines.extend([f"## Core {core_number}", ""])
+        lines.extend([f"## k={k}", ""])
         lines.extend(["### Nodes", ""])
         lines.extend(markdown_table(core_df, node_columns))
         lines.extend(["", "### Degree Stats", ""])
         lines.extend(markdown_table(core_stats, stat_columns))
         lines.extend(["", "### Shared Signed Atomics", ""])
-        lines.extend(markdown_table(core_union, union_columns))
+        lines.extend(markdown_table(core_atomics, union_columns))
         lines.append("")
 
     return "\n".join(lines).rstrip() + "\n"
-
-
-def save_reports(
-    output_dir,
-    name,
-    communities_df,
-    formula_dataframe,
-    degrees_df,
-    k_core_df,
-    community_atomic_df,
-    hubs_df,
-    k_core_stats_df,
-    k_core_union_df,
-):
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "full_report": output_dir / f"{name}_cluster_report_full.md",
-        "summary_report": output_dir / f"{name}_cluster_report_summary.md",
-        "k_core_full_report": output_dir / f"{name}_k_core_report_full.md",
-    }
-    paths["full_report"].write_text(
-        render_full_report(communities_df, formula_dataframe, degrees_df, k_core_df),
-        encoding="utf-8",
-    )
-    paths["summary_report"].write_text(
-        render_summary_report(
-            communities_df,
-            formula_dataframe,
-            degrees_df,
-            k_core_df,
-            community_atomic_df,
-            hubs_df,
-            k_core_stats_df,
-            k_core_union_df,
-        ),
-        encoding="utf-8",
-    )
-    paths["k_core_full_report"].write_text(
-        render_k_core_full_report(k_core_df, k_core_stats_df, k_core_union_df),
-        encoding="utf-8",
-    )
-    return paths
-
-
-def save_graph_outputs(
-    graph,
-    k_core_graph,
-    output_dir,
-    name,
-    *,
-    title,
-    seed,
-    communities_df,
-    formula_dataframe,
-    degrees_df,
-    k_core_df,
-    hubs_df,
-    k_core_stats_df,
-    community_atomic_df=None,
-    k_core_union_df=None,
-):
-    graph_dir = Path(output_dir) / "graph"
-    graph_dir.mkdir(parents=True, exist_ok=True)
-    community_atomic_df = (
-        pd.DataFrame() if community_atomic_df is None else community_atomic_df
-    )
-    k_core_union_df = pd.DataFrame() if k_core_union_df is None else k_core_union_df
-    paths = {
-        "png": graph_dir / f"{name}_neuron_graph.png",
-        "k_core_png": graph_dir / f"{name}_k_core_graph.png",
-        **save_reports(
-            graph_dir,
-            name,
-            communities_df,
-            formula_dataframe,
-            degrees_df,
-            k_core_df,
-            community_atomic_df,
-            hubs_df,
-            k_core_stats_df,
-            k_core_union_df,
-        ),
-    }
-    save_graph_plot(k_core_graph, communities_df, paths["png"], title=title, seed=seed)
-    save_k_core_plot(
-        graph,
-        k_core_df,
-        paths["k_core_png"],
-        title=f"{title} k-core",
-        seed=seed,
-    )
-    return paths
