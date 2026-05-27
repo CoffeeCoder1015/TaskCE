@@ -1,7 +1,6 @@
 import warnings
 from pathlib import Path
 
-import networkx as nx
 import pandas as pd
 import pytest
 import torch
@@ -11,6 +10,7 @@ from capture.saving import save_captured_activations
 from graph_builder import (
     build_project_graph_reports,
     report_graph,
+    render_report_markdown,
     save_graph_report,
 )
 
@@ -85,6 +85,29 @@ def test_report_graph_builds_one_signed_graph_from_one_adjacency_matrix():
     assert graph[0][2]["strength"] == 0.8
     assert graph[0][2]["sign"] == "negative"
     assert not graph.has_edge(0, 0)
+
+
+def test_report_graph_relu_sparsify_drops_non_positive_candidates():
+    adjacency = [
+        [1.0, -0.9, 0.3],
+        [-0.9, 1.0, 0.2],
+        [0.3, 0.2, 1.0],
+    ]
+
+    report, graph = report_graph(
+        adjacency,
+        formulas().iloc[:3],
+        relu_sparsify=True,
+        local_top_percentile=0.25,
+        min_neighbors=1,
+        k_core_start=1,
+    )
+
+    assert report["options"]["relu_sparsify"] is True
+    assert not graph.has_edge(0, 1)
+    assert graph.has_edge(0, 2)
+    assert graph.has_edge(1, 2)
+    assert all(data["sign"] == "positive" for _, _, data in graph.edges(data=True))
 
 
 def test_report_graph_fails_fast_when_formula_metadata_does_not_cover_matrix():
@@ -208,20 +231,60 @@ def test_save_graph_report_uses_name_and_graph_subdirectory(tmp_path):
     paths = save_graph_report(report, graph, tmp_path, name="pearson")
 
     assert paths["png"] == tmp_path / "graph" / "pearson_neuron_graph.png"
-    assert paths["graphml"] == tmp_path / "graph" / "pearson_neuron_graph.graphml"
-    assert paths["report"] == tmp_path / "graph" / "pearson_cluster_report.md"
+    assert paths["full_report"] == tmp_path / "graph" / "pearson_cluster_report_full.md"
+    assert paths["summary_report"] == (
+        tmp_path / "graph" / "pearson_cluster_report_summary.md"
+    )
+    assert set(paths) == {"png", "full_report", "summary_report"}
     assert paths["png"].stat().st_size > 0
-    assert nx.read_graphml(paths["graphml"]).number_of_nodes() == 4
+    assert not (tmp_path / "graph" / "pearson_neuron_graph.graphml").exists()
 
-    markdown = paths["report"].read_text(encoding="utf-8")
+    markdown = paths["full_report"].read_text(encoding="utf-8")
     assert "# Neuron Graph Cluster Report: pearson" in markdown
-    assert "## K-Core Results" in markdown
+    assert "## Core Metadata" in markdown
+    assert "### Shell Histogram" in markdown
+    assert "## Degree Distribution" in markdown
+    assert "## Weighted Degree Distribution" in markdown
     assert "| Selected K | 2 |" in markdown
     assert "| Max Core Number | 2 |" in markdown
     assert "core_number" in markdown
+    assert "weighted_degree" in markdown
     assert "tok:A" in markdown
     assert "tok:B" in markdown
     assert "tok:C" in markdown
+
+
+def test_summary_report_limits_members_to_top_ten_hubs_by_weighted_degree():
+    adjacency = [
+        [1.0 if row == column else 0.8 for column in range(12)]
+        for row in range(12)
+    ]
+    formula_rows = pd.DataFrame(
+        {"neuron": neuron, "formula": f"tok:{neuron}", "iou": 1.0}
+        for neuron in range(12)
+    )
+    report, _ = report_graph(
+        adjacency,
+        formula_rows,
+        local_top_percentile=1.0,
+        min_neighbors=1,
+        k_core_start=1,
+    )
+
+    assert len(report["communities"][0]["members"]) == 12
+    assert len(report["communities"][0]["top_hubs"]) == 10
+    assert report["k_core"]["shell_histogram"] == {11: 12}
+    assert report["degree_distribution"]["max"] == 11.0
+    assert report["weighted_degree_distribution"]["max"] == pytest.approx(8.8)
+
+    full_markdown = render_report_markdown(report, member_key="members")
+    summary_markdown = render_report_markdown(report, member_key="top_hubs")
+
+    assert "#### Top Non-Pruned Hubs" in summary_markdown
+    assert "tok:10" in full_markdown
+    assert "tok:11" in full_markdown
+    assert "tok:10" not in summary_markdown
+    assert "tok:11" not in summary_markdown
 
 
 def test_project_runner_calls_report_graph_separately_for_pearson_and_cosine(tmp_path):
@@ -275,17 +338,17 @@ def test_project_runner_calls_report_graph_separately_for_pearson_and_cosine(tmp
         "snli/cosine",
         "snli/pearson",
     ]
-    assert written["snli/base_pearson"]["report"] == (
-        Path(tmp_path) / "snli" / "graph" / "base_pearson_cluster_report.md"
+    assert written["snli/base_pearson"]["summary_report"] == (
+        Path(tmp_path) / "snli" / "graph" / "base_pearson_cluster_report_summary.md"
     )
-    assert written["snli/base_cosine"]["report"] == (
-        Path(tmp_path) / "snli" / "graph" / "base_cosine_cluster_report.md"
+    assert written["snli/base_cosine"]["summary_report"] == (
+        Path(tmp_path) / "snli" / "graph" / "base_cosine_cluster_report_summary.md"
     )
-    assert written["snli/pearson"]["report"] == (
-        Path(tmp_path) / "snli" / "graph" / "pearson_cluster_report.md"
+    assert written["snli/pearson"]["summary_report"] == (
+        Path(tmp_path) / "snli" / "graph" / "pearson_cluster_report_summary.md"
     )
-    assert written["snli/cosine"]["report"] == (
-        Path(tmp_path) / "snli" / "graph" / "cosine_cluster_report.md"
+    assert written["snli/cosine"]["summary_report"] == (
+        Path(tmp_path) / "snli" / "graph" / "cosine_cluster_report_summary.md"
     )
     assert not (Path(tmp_path) / "snli" / "graph" / "combined_cluster_report.md").exists()
     assert not (Path(tmp_path) / "snli" / "pearson_cluster_report.md").exists()

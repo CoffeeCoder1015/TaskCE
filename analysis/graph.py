@@ -50,9 +50,10 @@ def local_top_percent_union(adj_matrix, percent):
 
     for row_index, row in enumerate(strengths):
         nonzero_weights = row[row > 0.0]
-        threshold = np.quantile(nonzero_weights, 1.0 - float(percent))
-        keep_columns = row >= threshold
-        row_sparse[row_index, keep_columns] = matrix[row_index, keep_columns]
+        if nonzero_weights.size:
+            threshold = np.quantile(nonzero_weights, 1.0 - float(percent))
+            keep_columns = row >= threshold
+            row_sparse[row_index, keep_columns] = matrix[row_index, keep_columns]
 
     union_mask = (row_sparse != 0.0) | (row_sparse.T != 0.0)
     return np.where(union_mask, matrix, 0.0)
@@ -84,16 +85,34 @@ def analyze_k_core(graph):
 
 
 def analyze_degrees(graph):
+    rows = []
+    for node, degree in graph.degree():
+        edge_weights = [
+            edge_data["weight"]
+            for _, _, edge_data in graph.edges(node, data=True)
+        ]
+        positive_weights = [weight for weight in edge_weights if weight > 0.0]
+        negative_weights = [weight for weight in edge_weights if weight < 0.0]
+        rows.append(
+            {
+                "node": node,
+                "degree": degree,
+                "positive_edge_count": len(positive_weights),
+                "negative_edge_count": len(negative_weights),
+                "positive_weighted_degree": sum(positive_weights),
+                "negative_weighted_degree": sum(negative_weights),
+            }
+        )
     return pd.DataFrame(
-        {
-            "node": node,
-            "degree": degree,
-            "weighted_degree": sum(
-                edge_data["strength"]
-                for _, _, edge_data in graph.edges(node, data=True)
-            ),
-        }
-        for node, degree in graph.degree()
+        rows,
+        columns=[
+            "node",
+            "degree",
+            "positive_edge_count",
+            "negative_edge_count",
+            "positive_weighted_degree",
+            "negative_weighted_degree",
+        ],
     )
 
 
@@ -101,13 +120,13 @@ def analyze_communities(graph, method="louvain", seed=0, backend="cugraph"):
     if method == "louvain":
         communities = nx.community.louvain_communities(
             graph,
-            weight="strength",
+            weight="weight",
             seed=seed,
         )
     elif method == "leiden":
         communities = nx.community.leiden_communities(
             graph,
-            weight="strength",
+            weight="weight",
             seed=seed,
             backend=backend,
         )
@@ -206,8 +225,15 @@ def analyze_hubs(degrees_df, communities_df, limit=5):
     hubs = (
         communities_df.merge(degrees_df, on="node")
         .sort_values(
-            ["community", "weighted_degree", "degree", "node"],
-            ascending=[True, False, False, True],
+            [
+                "community",
+                "positive_weighted_degree",
+                "negative_weighted_degree",
+                "positive_edge_count",
+                "negative_edge_count",
+                "node",
+            ],
+            ascending=[True, False, False, False, True, True],
         )
         .groupby("community", as_index=False)
         .head(int(limit))
@@ -215,7 +241,16 @@ def analyze_hubs(degrees_df, communities_df, limit=5):
     )
     hubs["rank"] = hubs.groupby("community").cumcount() + 1
     return hubs[
-        ["community", "rank", "node", "degree", "weighted_degree"]
+        [
+            "community",
+            "rank",
+            "node",
+            "degree",
+            "positive_edge_count",
+            "negative_edge_count",
+            "positive_weighted_degree",
+            "negative_weighted_degree",
+        ]
     ].reset_index(drop=True)
 
 
@@ -255,8 +290,14 @@ def analyze_k_core_stats(k_core_df, degrees_df):
             node_count=("node", "nunique"),
             avg_degree=("degree", "mean"),
             max_degree=("degree", "max"),
-            avg_weighted_degree=("weighted_degree", "mean"),
-            max_weighted_degree=("weighted_degree", "max"),
+            avg_positive_edge_count=("positive_edge_count", "mean"),
+            max_positive_edge_count=("positive_edge_count", "max"),
+            avg_negative_edge_count=("negative_edge_count", "mean"),
+            max_negative_edge_count=("negative_edge_count", "max"),
+            avg_positive_weighted_degree=("positive_weighted_degree", "mean"),
+            max_positive_weighted_degree=("positive_weighted_degree", "max"),
+            avg_negative_weighted_degree=("negative_weighted_degree", "mean"),
+            min_negative_weighted_degree=("negative_weighted_degree", "min"),
         )
         .sort_values("core_number")
         .reset_index(drop=True)
@@ -279,7 +320,7 @@ def save_graph_plot(graph, communities_df, output_path, *, title, seed=0):
         community_id: color_map(index % color_map.N)
         for index, community_id in enumerate(community_ids)
     }
-    positions = nx.spring_layout(graph, weight="strength", seed=seed)
+    positions = nx.spring_layout(graph, weight="weight", seed=seed)
     node_colors = [colors[community_by_node[node]] for node in graph.nodes]
 
     plt.figure(figsize=(24, 20))
@@ -341,7 +382,7 @@ def save_k_core_plot(graph, k_core_df, output_path, *, title, seed=0):
         core_number: color_map(index / max(len(core_numbers) - 1, 1))
         for index, core_number in enumerate(core_numbers)
     }
-    positions = nx.spring_layout(graph, weight="strength", seed=seed)
+    positions = nx.spring_layout(graph, weight="weight", seed=seed)
     node_colors = [colors[core_by_node[node]] for node in graph.nodes]
 
     plt.figure(figsize=(24, 20))
@@ -434,7 +475,10 @@ def render_full_report(communities_df, formula_dataframe, degrees_df, k_core_df)
         "formula",
         "iou",
         "degree",
-        "weighted_degree",
+        "positive_edge_count",
+        "negative_edge_count",
+        "positive_weighted_degree",
+        "negative_weighted_degree",
         "core_number",
     ]
     columns = [column for column in base_columns if column in report_df.columns]
@@ -478,20 +522,37 @@ def render_summary_report(
             "formula",
             "iou",
             "degree",
-            "weighted_degree",
+            "positive_edge_count",
+            "negative_edge_count",
+            "positive_weighted_degree",
+            "negative_weighted_degree",
             "core_number",
         ]
         if column in report_df.columns
     ]
     atomic_columns = ["signed_atomic", "frequency", "neuron_presence"]
-    hub_columns = ["rank", "node", "degree", "weighted_degree"]
+    hub_columns = [
+        "rank",
+        "node",
+        "degree",
+        "positive_edge_count",
+        "negative_edge_count",
+        "positive_weighted_degree",
+        "negative_weighted_degree",
+    ]
     stat_columns = [
         "core_number",
         "node_count",
         "avg_degree",
         "max_degree",
-        "avg_weighted_degree",
-        "max_weighted_degree",
+        "avg_positive_edge_count",
+        "max_positive_edge_count",
+        "avg_negative_edge_count",
+        "max_negative_edge_count",
+        "avg_positive_weighted_degree",
+        "max_positive_weighted_degree",
+        "avg_negative_weighted_degree",
+        "min_negative_weighted_degree",
     ]
     union_columns = [
         "core_number",
@@ -505,8 +566,13 @@ def render_summary_report(
     for community_id, community_df in report_df.groupby("community", sort=True):
         core_numbers = sorted(community_df["core_number"].unique())
         top_formulas = community_df.sort_values(
-            ["weighted_degree", "iou", "node"],
-            ascending=[False, False, True],
+            [
+                "positive_weighted_degree",
+                "negative_weighted_degree",
+                "iou",
+                "node",
+            ],
+            ascending=[False, False, False, True],
         ).head(5)
         top_atomics = community_atomic_df[
             community_atomic_df["community"] == community_id
@@ -541,8 +607,14 @@ def render_k_core_full_report(k_core_df, k_core_stats_df, k_core_union_df):
         "node_count",
         "avg_degree",
         "max_degree",
-        "avg_weighted_degree",
-        "max_weighted_degree",
+        "avg_positive_edge_count",
+        "max_positive_edge_count",
+        "avg_negative_edge_count",
+        "max_negative_edge_count",
+        "avg_positive_weighted_degree",
+        "max_positive_weighted_degree",
+        "avg_negative_weighted_degree",
+        "min_negative_weighted_degree",
     ]
     union_columns = ["rank", "signed_atomic", "neuron_presence", "frequency"]
     lines = ["# K-Core Report Full", ""]
