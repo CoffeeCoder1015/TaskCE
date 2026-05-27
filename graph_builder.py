@@ -1,9 +1,8 @@
 import argparse
-import math
 import warnings
 from pathlib import Path
 
-import matplotlib
+import networkx as nx
 import numpy as np
 import pandas as pd
 
@@ -11,19 +10,70 @@ from analysis.activation_diagnostics import (
     raw_activation_correlation_matrix,
     raw_activation_cosine_similarity_matrix,
 )
+from analysis.graph import (
+    build_graph,
+    zero_diag,
+    relu,
+    local_top_percent_union,
+    analyze_k_core,
+    analyze_degrees,
+    analyze_communities,
+    analyze_hubs,
+    analyze_k_core_stats,
+    render_full_report,
+    save_graph_plot,
+)
 from capture import load_captured_activations
-
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 
 
 REQUIRED_FORMULA_COLUMNS = {"neuron", "formula", "iou"}
 DEFAULT_LOCAL_TOP_PERCENTILE = 0.001
-DEFAULT_MIN_NEIGHBORS = 3
 DEFAULT_K_CORE_START = 3
 DEFAULT_COMMUNITY_SEED = 0
 HUB_REPORT_LIMIT = 10
+
+
+def _make_sparsify_fn(*, local_top_percentile, relu_sparsify):
+    """Compose ``analysis.graph`` primitives into a sparsify function for
+    ``build_graph``.
+
+    Pipeline: ``zero_diag`` → (optional) ``relu`` → ``local_top_percent_union``.
+    """
+
+    def sparsify(adj_matrix):
+        matrix = zero_diag(adj_matrix)
+        if relu_sparsify:
+            matrix = relu(matrix)
+        return local_top_percent_union(matrix, local_top_percentile)
+
+    return sparsify
+
+
+def _add_extra_node_attributes(graph, formula_frame):
+    """Attach formula columns beyond ``formula`` and ``iou`` to nodes.
+
+    ``build_graph`` only copies ``formula`` and ``iou``; this fills in any
+    remaining columns (e.g. ``weight_entailment``).
+    """
+    extra_columns = [
+        col for col in formula_frame.columns
+        if col not in {"neuron", "formula", "iou"}
+    ]
+    if not extra_columns:
+        return
+    extra_attrs = {}
+    for row in formula_frame.to_dict("records"):
+        neuron = int(row["neuron"])
+        attrs = {}
+        for col in extra_columns:
+            value = row[col]
+            if isinstance(value, np.integer):
+                value = int(value)
+            elif isinstance(value, np.floating):
+                value = float(value)
+            attrs[col] = value
+        extra_attrs[neuron] = attrs
+    nx.set_node_attributes(graph, extra_attrs)
 
 
 def report_graph(
@@ -33,23 +83,28 @@ def report_graph(
     metric_name="graph",
     relu_sparsify=False,
     local_top_percentile=DEFAULT_LOCAL_TOP_PERCENTILE,
-    min_neighbors=DEFAULT_MIN_NEIGHBORS,
     k_core_start=DEFAULT_K_CORE_START,
     community_seed=DEFAULT_COMMUNITY_SEED,
+    community_method="louvain",
 ):
-    import networkx as nx
+    """Build a sparsified neuron graph and run structural analyses.
 
-    # Stage 1: normalize one adjacency matrix and the formula metadata rows.
+    Returns ``(report, k_core_graph)`` where *report* is a dict containing
+    the full sparsified graph, the k-core subgraph, and analysis DataFrames
+    (communities, degrees, k-core, hubs, k-core stats).
+
+    Louvain uses relu preprocessing. Leiden uses the signed sparse graph.
+    """
+
+    # ── validate inputs ──────────────────────────────────────────────────
     matrix = np.asarray(adj_matrix, dtype=float)
     assert matrix.ndim == 2 and matrix.shape[0] == matrix.shape[1], (
         f"expected square adjacency matrix, got shape {matrix.shape}"
     )
     assert np.isfinite(matrix).all(), "adjacency matrix must not contain NaN or inf"
     relu_sparsify = bool(relu_sparsify)
+    community_method = str(community_method)
     assert 0 < float(local_top_percentile) <= 1, "local_top_percentile must be in (0, 1]"
-    assert 1 <= int(min_neighbors) < matrix.shape[0], (
-        "min_neighbors must be at least 1 and smaller than neuron count"
-    )
     assert int(k_core_start) >= 1, "k_core_start must be at least 1"
 
     formula_frame = pd.DataFrame(formulas)
@@ -59,225 +114,115 @@ def report_graph(
     )
     assert not formula_frame.isna().any().any(), "formula rows must not contain null values"
 
-    metadata_by_neuron = {}
-    for row in formula_frame.to_dict("records"):
-        neuron = int(row.pop("neuron"))
-        metadata_by_neuron[neuron] = {}
-        for key, value in row.items():
-            if isinstance(value, np.integer):
-                value = int(value)
-            elif isinstance(value, np.floating):
-                value = float(value)
-            metadata_by_neuron[neuron][key] = value
     expected_neurons = set(range(matrix.shape[0]))
-    assert set(metadata_by_neuron) == expected_neurons, (
+    formula_neurons = {int(n) for n in formula_frame["neuron"]}
+    assert formula_neurons == expected_neurons, (
         "formula neurons must match adjacency indices: "
-        f"formulas={sorted(metadata_by_neuron)}, adjacency={sorted(expected_neurons)}"
+        f"formulas={sorted(formula_neurons)}, adjacency={sorted(expected_neurons)}"
     )
 
-    # Stage 2: construct a single NetworkX graph for this matrix and attach neuron metadata.
-    graph = nx.Graph(metric_name=str(metric_name))
-    for neuron in range(matrix.shape[0]):
-        graph.add_node(
-            int(neuron),
-            neuron=int(neuron),
-            **metadata_by_neuron[int(neuron)],
-        )
+    # ── build sparsified graph ───────────────────────────────────────────
+    sparsify_fn = _make_sparsify_fn(
+        local_top_percentile=local_top_percentile,
+        relu_sparsify=relu_sparsify or community_method == "louvain",
+    )
+    graph = build_graph(matrix, sparsify_fn, formula_frame)
+    _add_extra_node_attributes(graph, formula_frame)
 
-    # Stage 3: sparsify by each neuron's strongest local neighbors, preserving signed weights.
-    selected_edges = set()
-    for row_index, row in enumerate(matrix):
-        candidates = []
-        for column_index, weight in enumerate(row):
-            weight = float(weight)
-            if column_index == row_index or not np.isfinite(weight):
-                continue
-            strength = max(weight, 0.0) if relu_sparsify else abs(weight)
-            if strength == 0.0:
-                continue
-            candidates.append((int(column_index), strength))
-
-        if not candidates:
-            continue
-
-        percentile_count = math.ceil((matrix.shape[0] - 1) * float(local_top_percentile))
-        keep_count = max(1, int(min_neighbors), percentile_count)
-        keep_count = min(keep_count, len(candidates))
-        candidates.sort(key=lambda candidate: (-candidate[1], candidate[0]))
-
-        for column_index, _ in candidates[:keep_count]:
-            first, second = sorted((int(row_index), int(column_index)))
-            selected_edges.add((first, second))
-
-    for first, second in sorted(selected_edges):
-        weight = float(matrix[first, second])
-        if weight > 0:
-            sign = "positive"
-        elif weight < 0:
-            sign = "negative"
-        else:
-            sign = "zero"
-        graph.add_edge(
-            first,
-            second,
-            weight=weight,
-            strength=abs(weight),
-            sign=sign,
-        )
-
-
-    # Stage 4: run k-core analysis on the sparsified graph.
-    core_numbers = nx.core_number(graph)
-    nx.set_node_attributes(graph, core_numbers, "core_number")
-
-    max_core_number = max(core_numbers.values(), default=0)
+    # ── k-core analysis on the full sparsified graph ─────────────────────
+    k_core_df = analyze_k_core(graph)
+    nx.set_node_attributes(
+        graph,
+        k_core_df.set_index("node")["core_number"].to_dict(),
+        "core_number",
+    )
 
     selected_k = int(k_core_start)
-    selected_graph = nx.k_core(graph, k=selected_k).copy()
-    assert selected_graph.number_of_nodes() > 0, (
+    k_core_graph = nx.k_core(graph, k=selected_k).copy()
+    assert k_core_graph.number_of_nodes() > 0, (
         f"requested k-core is empty for k={selected_k}"
     )
 
-    # Stage 5: run community detection on the selected k-core graph.
-    communities = [
-        {int(node) for node in community}
-        for community in nx.community.louvain_communities(
-            selected_graph,
-            weight="strength",
-            seed=int(community_seed),
-        )
-    ]
+    # ── analyses on the k-core subgraph ──────────────────────────────────
+    communities_df = analyze_communities(
+        k_core_graph, method=community_method, seed=int(community_seed)
+    )
+    degrees_df = analyze_degrees(k_core_graph)
+    hubs_df = analyze_hubs(degrees_df, communities_df, limit=HUB_REPORT_LIMIT)
 
+    # k-core stats use full-graph degrees so every shell is represented.
+    full_degrees_df = analyze_degrees(graph)
+    k_core_stats_df = analyze_k_core_stats(k_core_df, full_degrees_df)
 
-    community_by_node = {}
-    for community_id, community_nodes in enumerate(communities):
-        for node in community_nodes:
-            community_by_node[node] = int(community_id)
-    nx.set_node_attributes(selected_graph, community_by_node, "community")
-    degree_by_node = dict(selected_graph.degree())
-    weighted_degree_by_node = {
-        int(node): float(
-            sum(
-                data.get("strength", 0.0)
-                for _, _, data in selected_graph.edges(node, data=True)
-            )
-        )
-        for node in selected_graph.nodes
-    }
-    shell_histogram = {}
-    for core_number in core_numbers.values():
-        shell_histogram[int(core_number)] = shell_histogram.get(int(core_number), 0) + 1
-
-    # Stage 6: shape the graph analysis into a report dictionary.
-    community_reports = []
-    for community_id, community_nodes in enumerate(communities):
-        ordered_nodes = sorted(community_nodes)
-        community_graph = selected_graph.subgraph(ordered_nodes)
-        members = []
-        for node in ordered_nodes:
-            attrs = dict(selected_graph.nodes[node])
-            attrs["neuron"] = int(node)
-            attrs["degree"] = int(degree_by_node[node])
-            attrs["weighted_degree"] = float(weighted_degree_by_node[node])
-            members.append(attrs)
-        summary_nodes = sorted(
-            [
-                node
-                for node in ordered_nodes
-                if "PRUNED" not in str(selected_graph.nodes[node].get("formula", ""))
-            ],
-            key=lambda node: (
-                -weighted_degree_by_node[node],
-                -degree_by_node[node],
-                node,
-            ),
-        )[:HUB_REPORT_LIMIT]
-        top_hubs = []
-        for node in summary_nodes:
-            attrs = dict(selected_graph.nodes[node])
-            attrs["neuron"] = int(node)
-            attrs["degree"] = int(degree_by_node[node])
-            attrs["weighted_degree"] = float(weighted_degree_by_node[node])
-            top_hubs.append(attrs)
-
-        strongest_edges = []
-        for first, second, data in sorted(
-            community_graph.edges(data=True),
-            key=lambda edge: (-edge[2].get("strength", 0.0), edge[0], edge[1]),
-        )[:10]:
-            strongest_edges.append(
-                {
-                    "first": int(first),
-                    "second": int(second),
-                    "weight": float(data["weight"]),
-                    "sign": data["sign"],
-                }
-            )
-
-        community_reports.append(
-            {
-                "id": int(community_id),
-                "nodes": community_graph.number_of_nodes(),
-                "internal_edges": community_graph.number_of_edges(),
-                "positive_internal_edges": sum(
-                    1
-                    for _, _, data in community_graph.edges(data=True)
-                    if data.get("sign") == "positive"
-                ),
-                "negative_internal_edges": sum(
-                    1
-                    for _, _, data in community_graph.edges(data=True)
-                    if data.get("sign") == "negative"
-                ),
-                "members": members,
-                "top_hubs": top_hubs,
-                "strongest_edges": strongest_edges,
-            }
-        )
+    # Attach community labels to the k-core graph nodes.
+    nx.set_node_attributes(
+        k_core_graph,
+        communities_df.set_index("node")["community"].to_dict(),
+        "community",
+    )
 
     report = {
         "metric_name": str(metric_name),
         "options": {
             "relu_sparsify": bool(relu_sparsify),
             "local_top_percentile": float(local_top_percentile),
-            "min_neighbors": int(min_neighbors),
             "k_core_start": int(k_core_start),
             "community_seed": int(community_seed),
+            "community_method": community_method,
         },
-        "graph_summary": {
-            "sparsified_nodes": graph.number_of_nodes(),
-            "sparsified_edges": graph.number_of_edges(),
-            "core_nodes": selected_graph.number_of_nodes(),
-            "core_edges": selected_graph.number_of_edges(),
-            "communities": len(communities),
-            "positive_core_edges": sum(
-                1
-                for _, _, data in selected_graph.edges(data=True)
-                if data.get("sign") == "positive"
-            ),
-            "negative_core_edges": sum(
-                1
-                for _, _, data in selected_graph.edges(data=True)
-                if data.get("sign") == "negative"
-            ),
-        },
-        "k_core": {
-            "requested_k": int(k_core_start),
-            "selected_k": int(selected_k),
-            "max_core_number": int(max_core_number),
-            "core_numbers": {int(node): int(value) for node, value in core_numbers.items()},
-            "shell_histogram": {
-                int(shell): int(count)
-                for shell, count in sorted(shell_histogram.items())
-            },
-        },
-        "degree_distribution": distribution_summary(degree_by_node.values()),
-        "weighted_degree_distribution": distribution_summary(
-            weighted_degree_by_node.values()
-        ),
-        "communities": community_reports,
+        "graph": graph,
+        "k_core_graph": k_core_graph,
+        "formula_dataframe": formula_frame,
+        "communities_df": communities_df,
+        "degrees_df": degrees_df,
+        "k_core_df": k_core_df,
+        "hubs_df": hubs_df,
+        "k_core_stats_df": k_core_stats_df,
     }
-    return report, selected_graph
+    return report, k_core_graph
+
+
+def save_graph_report(report, graph, output_dir, name):
+    """Save a community-coloured graph plot and markdown reports.
+
+    Returns a dict mapping output keys to their paths.
+    """
+    graph_dir = Path(output_dir) / "graph"
+    graph_dir.mkdir(parents=True, exist_ok=True)
+
+    communities_df = report["communities_df"]
+    formula_dataframe = report["formula_dataframe"]
+    degrees_df = report["degrees_df"]
+    k_core_df = report["k_core_df"]
+    metric_name = report["metric_name"]
+    selected_k = report["options"]["k_core_start"]
+    seed = report["options"]["community_seed"]
+
+    paths = {
+        "png": graph_dir / f"{name}_neuron_graph.png",
+        "full_report": graph_dir / f"{name}_cluster_report_full.md",
+        "summary_report": graph_dir / f"{name}_cluster_report_summary.md",
+    }
+
+    # Community-coloured graph plot.
+    save_graph_plot(
+        graph,
+        communities_df,
+        paths["png"],
+        title=f"{metric_name} neuron graph (k-core {selected_k})",
+        seed=seed,
+    )
+
+    # Markdown reports.
+    full_text = render_full_report(
+        communities_df, formula_dataframe, degrees_df, k_core_df
+    )
+    paths["full_report"].write_text(full_text, encoding="utf-8")
+    # Without a tokenizer we cannot produce atomic-frequency data for
+    # the richer summary report, so the summary mirrors the full report.
+    paths["summary_report"].write_text(full_text, encoding="utf-8")
+
+    return paths
 
 
 def build_project_graph_reports(
@@ -285,14 +230,23 @@ def build_project_graph_reports(
     *,
     relu_sparsify=False,
     local_top_percentile=DEFAULT_LOCAL_TOP_PERCENTILE,
-    min_neighbors=DEFAULT_MIN_NEIGHBORS,
     k_core_start=DEFAULT_K_CORE_START,
     community_seed=DEFAULT_COMMUNITY_SEED,
+    community_method="louvain",
 ):
+    """Run graph analysis for every task found under *results_path*."""
     results_path = Path(results_path)
     results_root = results_path if results_path.is_dir() else results_path.parent.parent
     captured_results = load_captured_activations(results_path)
     written_paths = {}
+
+    graph_kwargs = dict(
+        relu_sparsify=relu_sparsify,
+        local_top_percentile=local_top_percentile,
+        k_core_start=k_core_start,
+        community_seed=community_seed,
+        community_method=community_method,
+    )
 
     for task_name in sorted(captured_results):
         result_csv_path = results_root / f"{task_name}_beam_results.csv"
@@ -311,38 +265,18 @@ def build_project_graph_reports(
 
         pearson_matrix = raw_activation_correlation_matrix(states)
         pearson_report, pearson_graph = report_graph(
-            pearson_matrix,
-            formulas,
-            metric_name="pearson",
-            relu_sparsify=relu_sparsify,
-            local_top_percentile=local_top_percentile,
-            min_neighbors=min_neighbors,
-            k_core_start=k_core_start,
-            community_seed=community_seed,
+            pearson_matrix, formulas, metric_name="pearson", **graph_kwargs
         )
         written_paths[f"{task_name}/pearson"] = save_graph_report(
-            pearson_report,
-            pearson_graph,
-            output_dir,
-            name="pearson",
+            pearson_report, pearson_graph, output_dir, name="pearson"
         )
 
         cosine_matrix = raw_activation_cosine_similarity_matrix(states)
         cosine_report, cosine_graph = report_graph(
-            cosine_matrix,
-            formulas,
-            metric_name="cosine",
-            relu_sparsify=relu_sparsify,
-            local_top_percentile=local_top_percentile,
-            min_neighbors=min_neighbors,
-            k_core_start=k_core_start,
-            community_seed=community_seed,
+            cosine_matrix, formulas, metric_name="cosine", **graph_kwargs
         )
         written_paths[f"{task_name}/cosine"] = save_graph_report(
-            cosine_report,
-            cosine_graph,
-            output_dir,
-            name="cosine",
+            cosine_report, cosine_graph, output_dir, name="cosine"
         )
 
         if "base" not in task_results:
@@ -353,285 +287,21 @@ def build_project_graph_reports(
 
         base_pearson_matrix = raw_activation_correlation_matrix(base_states)
         base_pearson_report, base_pearson_graph = report_graph(
-            base_pearson_matrix,
-            formulas,
-            metric_name="base_pearson",
-            relu_sparsify=relu_sparsify,
-            local_top_percentile=local_top_percentile,
-            min_neighbors=min_neighbors,
-            k_core_start=k_core_start,
-            community_seed=community_seed,
+            base_pearson_matrix, formulas, metric_name="base_pearson", **graph_kwargs
         )
         written_paths[f"{task_name}/base_pearson"] = save_graph_report(
-            base_pearson_report,
-            base_pearson_graph,
-            output_dir,
-            name="base_pearson",
+            base_pearson_report, base_pearson_graph, output_dir, name="base_pearson"
         )
 
         base_cosine_matrix = raw_activation_cosine_similarity_matrix(base_states)
         base_cosine_report, base_cosine_graph = report_graph(
-            base_cosine_matrix,
-            formulas,
-            metric_name="base_cosine",
-            relu_sparsify=relu_sparsify,
-            local_top_percentile=local_top_percentile,
-            min_neighbors=min_neighbors,
-            k_core_start=k_core_start,
-            community_seed=community_seed,
+            base_cosine_matrix, formulas, metric_name="base_cosine", **graph_kwargs
         )
         written_paths[f"{task_name}/base_cosine"] = save_graph_report(
-            base_cosine_report,
-            base_cosine_graph,
-            output_dir,
-            name="base_cosine",
+            base_cosine_report, base_cosine_graph, output_dir, name="base_cosine"
         )
 
     return written_paths
-
-
-def render_report_markdown(report, *, member_key="members"):
-    member_heading = (
-        "Top Non-Pruned Hubs" if member_key == "top_hubs" else "Members"
-    )
-    lines = [
-        f"# Neuron Graph Cluster Report: {report['metric_name']}",
-        "",
-        "## Graph Summary",
-        "",
-        "| Metric | Value |",
-        "| :--- | :--- |",
-    ]
-    for key, value in report["graph_summary"].items():
-        lines.append(f"| {key.replace('_', ' ').title()} | {value} |")
-
-    lines.extend(
-        [
-            "",
-            "## Core Metadata",
-            "",
-            "| Metric | Value |",
-            "| :--- | :--- |",
-            f"| Requested K | {report['k_core']['requested_k']} |",
-            f"| Selected K | {report['k_core']['selected_k']} |",
-            f"| Max Core Number | {report['k_core']['max_core_number']} |",
-        ]
-    )
-
-    lines.extend(["", "### Shell Histogram", ""])
-    lines.append("| Core Number | Nodes |")
-    lines.append("| :--- | :--- |")
-    for core_number, count in report["k_core"]["shell_histogram"].items():
-        lines.append(f"| {core_number} | {count} |")
-
-    lines.extend(["", "## Degree Distribution", ""])
-    lines.extend(render_distribution_table(report["degree_distribution"]))
-
-    lines.extend(["", "## Weighted Degree Distribution", ""])
-    lines.extend(render_distribution_table(report["weighted_degree_distribution"]))
-
-    lines.extend(["", "## Communities", ""])
-    assert report["communities"], "report must contain communities"
-
-    for community in report["communities"]:
-        lines.extend(
-            [
-                f"### Community {community['id']}",
-                "",
-                "| Metric | Value |",
-                "| :--- | :--- |",
-                f"| Nodes | {community['nodes']} |",
-                f"| Internal Edges | {community['internal_edges']} |",
-                f"| Positive Internal Edges | {community['positive_internal_edges']} |",
-                f"| Negative Internal Edges | {community['negative_internal_edges']} |",
-                "",
-            ]
-        )
-
-        members = community[member_key]
-        lines.extend([f"#### {member_heading}", ""])
-        if not members:
-            lines.extend(["No non-pruned hubs.", ""])
-        else:
-            member_columns = sorted({key for member in members for key in member})
-            preferred = [
-                "neuron",
-                "formula",
-                "iou",
-                "degree",
-                "weighted_degree",
-                "core_number",
-                "community",
-            ]
-            weight_columns = [
-                column for column in member_columns if column.startswith("weight_")
-            ]
-            columns = [
-                *[column for column in preferred if column in member_columns],
-                *weight_columns,
-                *[
-                    column
-                    for column in member_columns
-                    if column not in {*preferred, *weight_columns}
-                ],
-            ]
-            lines.append("| " + " | ".join(columns) + " |")
-            lines.append("| " + " | ".join(":---" for _ in columns) + " |")
-            for member in members:
-                lines.append(
-                    "| "
-                    + " | ".join(
-                        markdown_cell(member.get(column, "")) for column in columns
-                    )
-                    + " |"
-                )
-
-        lines.extend(["", "#### Strongest Internal Edges", ""])
-        if not community["strongest_edges"]:
-            lines.append("No internal edges.")
-        for edge in community["strongest_edges"]:
-            lines.append(
-                f"- neuron {edge['first']} <-> neuron {edge['second']}: "
-                f"{edge['weight']:.6f} ({edge['sign']})"
-            )
-        lines.append("")
-
-    return "\n".join(lines) + "\n"
-
-
-def render_distribution_table(summary):
-    lines = ["| Metric | Value |", "| :--- | :--- |"]
-    for key in ["min", "p25", "median", "p75", "max", "mean"]:
-        lines.append(f"| {key} | {summary[key]:.6f} |")
-    return lines
-
-
-def distribution_summary(values):
-    values = np.asarray(list(values), dtype=float)
-    if values.size == 0:
-        return {
-            "min": 0.0,
-            "p25": 0.0,
-            "median": 0.0,
-            "p75": 0.0,
-            "max": 0.0,
-            "mean": 0.0,
-        }
-    return {
-        "min": float(np.min(values)),
-        "p25": float(np.percentile(values, 25)),
-        "median": float(np.percentile(values, 50)),
-        "p75": float(np.percentile(values, 75)),
-        "max": float(np.max(values)),
-        "mean": float(np.mean(values)),
-    }
-
-
-def markdown_cell(value):
-    if isinstance(value, float):
-        return f"{value:.6f}"
-    return str(value).replace("|", "\\|").replace("\n", " ")
-
-
-def save_graph_report(report, graph, output_dir, name):
-    import networkx as nx
-    from matplotlib.patches import Patch
-
-    graph_dir = Path(output_dir) / "graph"
-    graph_dir.mkdir(parents=True, exist_ok=True)
-    paths = {
-        "png": graph_dir / f"{name}_neuron_graph.png",
-        "full_report": graph_dir / f"{name}_cluster_report_full.md",
-        "summary_report": graph_dir / f"{name}_cluster_report_summary.md",
-    }
-
-    plt.figure(figsize=(24, 20))
-    assert graph.number_of_nodes() > 0, "cannot save an empty graph"
-    assert graph.number_of_edges() > 0, "cannot save a graph with no edges"
-
-    positions = nx.spring_layout(
-        graph,
-        weight="strength",
-        k=2.0 / math.sqrt(graph.number_of_nodes()),
-        scale=3.0,
-        seed=report["options"]["community_seed"],
-    )
-    positive_edges = [
-        edge for edge in graph.edges if graph.edges[edge]["sign"] == "positive"
-    ]
-    negative_edges = [
-        edge for edge in graph.edges if graph.edges[edge]["sign"] == "negative"
-    ]
-    community_ids = sorted({int(graph.nodes[node]["community"]) for node in graph.nodes})
-    community_colors = {
-        community_id: plt.cm.tab20(index % 20)
-        for index, community_id in enumerate(community_ids)
-    }
-    node_colors = [
-        community_colors[int(graph.nodes[node]["community"])]
-        for node in graph.nodes
-    ]
-    nx.draw_networkx_nodes(
-        graph,
-        positions,
-        node_color=node_colors,
-        node_size=450,
-        edgecolors="black",
-        linewidths=0.6,
-    )
-    nx.draw_networkx_edges(
-        graph,
-        positions,
-        edgelist=positive_edges,
-        edge_color="#3366cc",
-        alpha=0.6,
-        width=1.3,
-    )
-    nx.draw_networkx_edges(
-        graph,
-        positions,
-        edgelist=negative_edges,
-        edge_color="#cc3333",
-        alpha=0.6,
-        width=1.3,
-        style="dashed",
-    )
-    nx.draw_networkx_labels(
-        graph,
-        positions,
-        labels={node: str(node) for node in graph.nodes},
-        font_size=8,
-    )
-    legend_handles = [
-        Patch(
-            facecolor=community_colors[community_id],
-            edgecolor="black",
-            label=f"Community {community_id}",
-        )
-        for community_id in community_ids
-    ]
-    plt.legend(
-        handles=legend_handles,
-        loc="center left",
-        bbox_to_anchor=(1.01, 0.5),
-        frameon=True,
-        fontsize=10,
-    )
-    plt.title(f"{report['metric_name']} neuron graph (k-core {report['k_core']['selected_k']})")
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(paths["png"], dpi=250)
-    plt.close()
-
-    paths["full_report"].write_text(
-        render_report_markdown(report, member_key="members"),
-        encoding="utf-8",
-    )
-    paths["summary_report"].write_text(
-        render_report_markdown(report, member_key="top_hubs"),
-        encoding="utf-8",
-    )
-    return paths
 
 
 def parse_args():
@@ -649,9 +319,19 @@ def parse_args():
         action="store_true",
         help="Drop non-positive weights before selecting strongest neighbors.",
     )
+    parser.add_argument(
+        "--community-method",
+        choices=["louvain", "leiden"],
+        default="louvain",
+        help="Community detection method. Louvain applies relu preprocessing.",
+    )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    build_project_graph_reports(args.results_path, relu_sparsify=args.relu)
+    build_project_graph_reports(
+        args.results_path,
+        relu_sparsify=args.relu,
+        community_method=args.community_method,
+    )
