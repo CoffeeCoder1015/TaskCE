@@ -32,6 +32,10 @@ k_core_range = range(1, 8)
 pipeline = "leiden"
 layout_backend = "spring"
 negative_mode = "render_only"
+plot_config = {
+    "layout_backend": layout_backend,
+    "negative_mode": negative_mode,
+}
 sparsifying_functions = {
     "louvain": lambda adj_matrix: local_top_neighbors_union(
         relu(zero_diag(adj_matrix)),
@@ -59,34 +63,33 @@ def graph_pipeline(
     searched_formulas,
     output_dir,
     name,
-    *,
-    layout_backend=layout_backend,
-    negative_mode=negative_mode,
 ):
-    G = build_graph(adj_matrix,sparsifying_functions[pipeline],searched_formulas)
-    communities = analyze_communities(G,pipeline)
-    degrees = analyze_degrees(G)
-    hubs = analyze_hubs(degrees,communities)
-    community_atomics = analyze_community_atomic_frequencies(G,communities) 
-    k_core_nodes_df, k_core_stats_df = analyze_k_core(G, k_range=k_core_range)
-    k_core_atomics = analyze_k_core_atomic_frequencies(G,k_core_nodes_df)
+    graph = build_graph(
+        adj_matrix,
+        sparsifying_functions[pipeline],
+        searched_formulas,
+    )
+    communities = analyze_communities(graph, pipeline)
+    degrees = analyze_degrees(graph)
+    hubs = analyze_hubs(degrees, communities)
+    community_atomics = analyze_community_atomic_frequencies(graph, communities)
+    k_core_nodes_df, k_core_stats_df = analyze_k_core(graph, k_range=k_core_range)
+    k_core_atomics = analyze_k_core_atomic_frequencies(graph, k_core_nodes_df)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     save_graph_plot(
-        G,
+        graph,
         communities,
         output_dir / f"{name}_graph.png",
         title=f"{name} graph",
-        layout_backend=layout_backend,
-        negative_mode=negative_mode,
+        **plot_config,
     )
     save_k_core_plot(
-        G,
+        graph,
         k_core_nodes_df,
         output_dir / f"{name}_k_core_graph.png",
         title=f"{name} k-core layers",
-        layout_backend=layout_backend,
-        negative_mode=negative_mode,
+        **plot_config,
     )
     (output_dir / f"{name}_cluster_report_full.md").write_text(
         render_full_report(communities, searched_formulas, degrees),
@@ -116,7 +119,7 @@ def graph_pipeline(
 
 for task in captured:
     task_data = captured[task]
-    for checkpoint in ["finetuned","base"]:
+    for checkpoint in ["finetuned", "base"]:
         activations = task_data[checkpoint].states
         formulas = pd.read_csv(results_path / f"{task}_beam_results.csv")
         
@@ -131,7 +134,7 @@ for task in captured:
             f"{task}_{checkpoint}_pearson_{pipeline}",
         )
         
-        #cosine
+        # cosine
         graph_pipeline(
             cosine,
             formulas,
