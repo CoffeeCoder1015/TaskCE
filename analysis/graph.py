@@ -18,6 +18,7 @@ from sympy.logic.boolalg import Not as SymNot
 ATOMIC_PATTERN_TEXT = r"[A-Za-z_][\w-]*:(?:<[^>]+>|[^\s()]+)"
 ATOMIC_PATTERN = re.compile(ATOMIC_PATTERN_TEXT)
 NEGATED_ATOMIC_PATTERN = re.compile(rf"\(\s*NOT\s+({ATOMIC_PATTERN_TEXT})\s*\)")
+SMALL_COMMUNITY_ID = -1
 
 # Layout
 GOLDEN_ANGLE_RADIANS = math.pi * (3.0 - math.sqrt(5.0))
@@ -194,7 +195,13 @@ def analyze_degrees(graph):
     )
 
 
-def analyze_communities(graph, method="louvain", seed=0, backend="cugraph"):
+def analyze_communities(
+    graph,
+    method="louvain",
+    seed=0,
+    backend="cugraph",
+    min_community_size=2,
+):
     if method == "louvain":
         communities = nx.community.louvain_communities(
             graph,
@@ -211,11 +218,18 @@ def analyze_communities(graph, method="louvain", seed=0, backend="cugraph"):
     else:
         raise NotImplementedError(f"Unsupported community method: {method}")
 
-    return pd.DataFrame(
+    communities_df = pd.DataFrame(
         {"node": node, "community": community_id}
         for community_id, community in enumerate(communities)
         for node in community
     )
+    community_sizes = communities_df["community"].value_counts()
+    small_communities = community_sizes[community_sizes < min_community_size].index
+    communities_df.loc[
+        communities_df["community"].isin(small_communities),
+        "community",
+    ] = SMALL_COMMUNITY_ID
+    return communities_df
 
 
 def sympy_formula_text(formula, placeholders):
