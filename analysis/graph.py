@@ -21,11 +21,39 @@ from sympy.parsing.sympy_parser import parse_expr
 ATOMIC_PATTERN_TEXT = r"[A-Za-z_][\w-]*:(?:<[^>]+>|[^\s()]+)"
 ATOMIC_PATTERN = re.compile(ATOMIC_PATTERN_TEXT)
 NEGATED_ATOMIC_PATTERN = re.compile(rf"\(\s*NOT\s+({ATOMIC_PATTERN_TEXT})\s*\)")
+
+# Layout
 GOLDEN_ANGLE_RADIANS = math.pi * (3.0 - math.sqrt(5.0))
 SPRING_LAYOUT_K_SCALE = 2.4
+NEGATIVE_EDGE_DISTANCE_SCALE = 0.9
+
+# Node overlap
 NODE_OVERLAP_DISTANCE_SCALE = 0.55
 NODE_OVERLAP_MIN_DISTANCE = 0.015
-NEGATIVE_EDGE_DISTANCE_SCALE = 0.9
+
+# K-core hulls
+K_CORE_HULL_PADDING_SCALE = 0.045
+K_CORE_HULL_MIN_PADDING = 0.04
+K_CORE_HULL_ALPHA = 0.2
+K_CORE_HULL_LINEWIDTH = 1.2
+K_CORE_NODE_SIZE_SCALE = 0.85
+
+# Density-scaled plot style
+MAX_NODE_SIZE = 420.0
+MIN_NODE_SIZE = 28.0
+NODE_SIZE_DENSITY_SCALE = 3800.0
+MAX_LABEL_FONT_SIZE = 8.5
+MIN_LABEL_FONT_SIZE = 2.8
+LABEL_FONT_DENSITY_SCALE = 42.0
+MAX_NODE_LINEWIDTH = 0.8
+MIN_NODE_LINEWIDTH = 0.2
+NODE_LINEWIDTH_DENSITY_SCALE = 4.5
+MAX_LABEL_ALPHA = 0.95
+MIN_LABEL_ALPHA = 0.28
+LABEL_ALPHA_DENSITY_SCALE = 16.0
+MAX_EDGE_WIDTH = 1.15
+MIN_EDGE_WIDTH = 0.25
+EDGE_WIDTH_DENSITY_SCALE = 7.5
 
 
 def zero_diag(adj_matrix):
@@ -139,7 +167,7 @@ def build_graph(adj_matrix, sparsify_fn, formula_dataframe):
             "signed_atomic_counts": signed_atomic_counts(row.formula),
         }
 
-    nx.set_node_attributes(graph,node_metadata)
+    nx.set_node_attributes(graph, node_metadata)
     
     return graph
 
@@ -525,7 +553,6 @@ def k_core_component_hulls(graph, positions, k_core_nodes_df, padding):
             component_points = [
                 positions[node]
                 for node in component
-                if node in positions
             ]
             polygon = padded_hull_polygon(component_points, padding)
             if polygon is not None:
@@ -795,11 +822,26 @@ def graph_plot_style(node_count):
     count = max(int(node_count), 1)
     density_scale = math.sqrt(count)
     return {
-        "node_size": max(28.0, min(420.0, 3800.0 / density_scale)),
-        "font_size": max(2.8, min(8.5, 42.0 / density_scale)),
-        "node_linewidth": max(0.2, min(0.8, 4.5 / density_scale)),
-        "label_alpha": max(0.28, min(0.95, 16.0 / density_scale)),
-        "edge_width": max(0.25, min(1.15, 7.5 / density_scale)),
+        "node_size": max(
+            MIN_NODE_SIZE,
+            min(MAX_NODE_SIZE, NODE_SIZE_DENSITY_SCALE / density_scale),
+        ),
+        "font_size": max(
+            MIN_LABEL_FONT_SIZE,
+            min(MAX_LABEL_FONT_SIZE, LABEL_FONT_DENSITY_SCALE / density_scale),
+        ),
+        "node_linewidth": max(
+            MIN_NODE_LINEWIDTH,
+            min(MAX_NODE_LINEWIDTH, NODE_LINEWIDTH_DENSITY_SCALE / density_scale),
+        ),
+        "label_alpha": max(
+            MIN_LABEL_ALPHA,
+            min(MAX_LABEL_ALPHA, LABEL_ALPHA_DENSITY_SCALE / density_scale),
+        ),
+        "edge_width": max(
+            MIN_EDGE_WIDTH,
+            min(MAX_EDGE_WIDTH, EDGE_WIDTH_DENSITY_SCALE / density_scale),
+        ),
     }
 
 
@@ -944,7 +986,10 @@ def save_k_core_plot(
     style = graph_plot_style(graph.number_of_nodes())
     position_array = np.asarray(list(positions.values()), dtype=float)
     layout_span = np.ptp(position_array, axis=0).max() if len(position_array) else 1.0
-    hull_padding = max(layout_span * 0.045, 0.04)
+    hull_padding = max(
+        layout_span * K_CORE_HULL_PADDING_SCALE,
+        K_CORE_HULL_MIN_PADDING,
+    )
 
     # Drawing
     figure, axis = plt.subplots(figsize=(24, 20))
@@ -961,8 +1006,8 @@ def save_k_core_plot(
                 closed=True,
                 facecolor=colors[k],
                 edgecolor=colors[k],
-                alpha=0.2,
-                linewidth=1.2,
+                alpha=K_CORE_HULL_ALPHA,
+                linewidth=K_CORE_HULL_LINEWIDTH,
                 zorder=0,
             )
         )
@@ -972,7 +1017,7 @@ def save_k_core_plot(
         graph,
         positions,
         node_color="#f2f2f2",
-        node_size=style["node_size"] * 0.85,
+        node_size=style["node_size"] * K_CORE_NODE_SIZE_SCALE,
         edgecolors="#555555",
         linewidths=style["node_linewidth"],
         ax=axis,
@@ -990,7 +1035,7 @@ def save_k_core_plot(
             Patch(
                 facecolor=colors[layer["k_values"][0]],
                 edgecolor=colors[layer["k_values"][0]],
-                alpha=0.2,
+                alpha=K_CORE_HULL_ALPHA,
                 label=k_core_layer_label(layer["k_values"]),
             )
             for layer in layers
