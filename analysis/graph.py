@@ -1,10 +1,18 @@
 from collections import Counter
+import math
 from pathlib import Path
 import re
 
+import matplotlib
+
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+from matplotlib.colors import to_rgba
+from matplotlib.patches import Patch, Polygon
 import networkx as nx
 import numpy as np
 import pandas as pd
+from scipy.spatial import ConvexHull, QhullError
 from sympy import Symbol
 from sympy.logic.boolalg import Not as SymNot
 from sympy.parsing.sympy_parser import parse_expr
@@ -13,6 +21,11 @@ from sympy.parsing.sympy_parser import parse_expr
 ATOMIC_PATTERN_TEXT = r"[A-Za-z_][\w-]*:(?:<[^>]+>|[^\s()]+)"
 ATOMIC_PATTERN = re.compile(ATOMIC_PATTERN_TEXT)
 NEGATED_ATOMIC_PATTERN = re.compile(rf"\(\s*NOT\s+({ATOMIC_PATTERN_TEXT})\s*\)")
+GOLDEN_ANGLE_RADIANS = math.pi * (3.0 - math.sqrt(5.0))
+SPRING_LAYOUT_K_SCALE = 2.4
+NODE_OVERLAP_DISTANCE_SCALE = 0.55
+NODE_OVERLAP_MIN_DISTANCE = 0.015
+NEGATIVE_EDGE_DISTANCE_SCALE = 0.9
 
 
 def zero_diag(adj_matrix):
@@ -62,6 +75,40 @@ def local_top_percent_union(adj_matrix, percent):
 
     union_mask = (row_sparse != 0.0) | (row_sparse.T != 0.0)
     return np.where(union_mask, matrix, 0.0)
+
+
+def local_top_neighbors_union(adj_matrix, percent, min_neighbors=1):
+    matrix = np.asarray(adj_matrix, dtype=float)
+    sparse = np.zeros_like(matrix, dtype=float)
+    selected_edges = set()
+    node_count = matrix.shape[0]
+
+    for row_index, row in enumerate(matrix):
+        candidates = []
+        for column_index, weight in enumerate(row):
+            weight = float(weight)
+            if column_index == row_index or weight == 0.0:
+                continue
+            candidates.append((int(column_index), abs(weight)))
+
+        if not candidates:
+            continue
+
+        percent_count = math.ceil((node_count - 1) * float(percent))
+        keep_count = max(1, int(min_neighbors), percent_count)
+        keep_count = min(keep_count, len(candidates))
+        candidates.sort(key=lambda candidate: (-candidate[1], candidate[0]))
+
+        for column_index, _ in candidates[:keep_count]:
+            first, second = sorted((int(row_index), int(column_index)))
+            selected_edges.add((first, second))
+
+    for first, second in selected_edges:
+        weight = matrix[first, second]
+        sparse[first, second] = weight
+        sparse[second, first] = weight
+
+    return sparse
 
 
 def signed_atomic_counts(formula):
@@ -356,13 +403,453 @@ def analyze_hubs(degrees_df, communities_df, limit=5):
         ]
     ].reset_index(drop=True)
 
-def save_graph_plot(graph, communities_df, output_path, *, title, seed=0):
-    import matplotlib
 
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch
+def distinct_k_core_layers(graph, k_core_nodes_df):
+    graph_nodes = set(graph.nodes)
+    layers = []
+    seen_node_sets = set()
 
+    for k in sorted(k_core_nodes_df["k"].unique()):
+        k_nodes = frozenset(
+            node
+            for node in k_core_nodes_df[k_core_nodes_df["k"] == k]["node"]
+            if node in graph_nodes
+        )
+        if not k_nodes:
+            continue
+
+        if layers and k_nodes == layers[-1]["nodes"]:
+            layers[-1]["k_values"].append(k)
+            continue
+
+        if k_nodes in seen_node_sets:
+            continue
+
+        layers.append({"k_values": [k], "nodes": k_nodes})
+        seen_node_sets.add(k_nodes)
+
+    return layers
+
+
+def k_core_layer_label(k_values):
+    values = [int(k) for k in k_values]
+    if len(values) == 1:
+        return f"k={values[0]}"
+    return f"k={values[0]}-{values[-1]}"
+
+
+def padded_hull_polygon(points, padding):
+    points = np.asarray(points, dtype=float)
+    if points.shape[0] == 0:
+        return None
+    if points.shape[0] == 1:
+        return circle_polygon(points[0], padding)
+    if points.shape[0] == 2:
+        return capsule_polygon(points[0], points[1], padding)
+
+    try:
+        hull = ConvexHull(points)
+        hull_points = points[hull.vertices]
+    except QhullError:
+        return capsule_for_collinear_points(points, padding)
+
+    centroid = hull_points.mean(axis=0)
+    vectors = hull_points - centroid
+    distances = np.linalg.norm(vectors, axis=1)
+    padded = hull_points.copy()
+    nonzero = distances > 0.0
+    padded[nonzero] += vectors[nonzero] / distances[nonzero, None] * padding
+    return padded
+
+
+def circle_polygon(center, radius, segments=24):
+    angles = np.linspace(0.0, 2.0 * math.pi, int(segments), endpoint=False)
+    return np.column_stack(
+        [
+            center[0] + radius * np.cos(angles),
+            center[1] + radius * np.sin(angles),
+        ]
+    )
+
+
+def capsule_polygon(first, second, radius, segments=12):
+    first = np.asarray(first, dtype=float)
+    second = np.asarray(second, dtype=float)
+    axis = second - first
+    length = np.linalg.norm(axis)
+    if length == 0.0:
+        return circle_polygon(first, radius)
+
+    unit = axis / length
+    angle = math.atan2(unit[1], unit[0])
+    first_angles = np.linspace(
+        angle + math.pi / 2.0,
+        angle + 3.0 * math.pi / 2.0,
+        int(segments),
+    )
+    second_angles = np.linspace(
+        angle - math.pi / 2.0,
+        angle + math.pi / 2.0,
+        int(segments),
+    )
+    first_arc = np.column_stack(
+        [
+            first[0] + radius * np.cos(first_angles),
+            first[1] + radius * np.sin(first_angles),
+        ]
+    )
+    second_arc = np.column_stack(
+        [
+            second[0] + radius * np.cos(second_angles),
+            second[1] + radius * np.sin(second_angles),
+        ]
+    )
+    return np.vstack([first_arc, second_arc])
+
+
+def capsule_for_collinear_points(points, padding):
+    points = np.asarray(points, dtype=float)
+    distances = np.linalg.norm(points[:, None, :] - points[None, :, :], axis=2)
+    first_index, second_index = np.unravel_index(
+        np.argmax(distances),
+        distances.shape,
+    )
+    return capsule_polygon(points[first_index], points[second_index], padding)
+
+
+def k_core_component_hulls(graph, positions, k_core_nodes_df, padding):
+    hulls = []
+    for layer in distinct_k_core_layers(graph, k_core_nodes_df):
+        subgraph = graph.subgraph(layer["nodes"])
+        for component in nx.connected_components(subgraph):
+            component_points = [
+                positions[node]
+                for node in component
+                if node in positions
+            ]
+            polygon = padded_hull_polygon(component_points, padding)
+            if polygon is not None:
+                hulls.append(
+                    {
+                        "k_values": layer["k_values"],
+                        "nodes": frozenset(component),
+                        "polygon": polygon,
+                    }
+                )
+    return hulls
+
+
+# Layout uses rank bands so edge magnitudes shape structure without overfitting tiny weight differences.
+def rank_banded_layout_weights(graph, *, bands=4):
+    strengths_by_edge = {
+        (u, v): abs(float(edge_data["weight"]))
+        for u, v, edge_data in graph.edges(data=True)
+    }
+    positive_strengths = sorted(
+        {
+            strength
+            for strength in strengths_by_edge.values()
+            if strength > 0.0
+        }
+    )
+    if not positive_strengths:
+        return {edge: 1.0 for edge in strengths_by_edge}
+
+    band_count = max(1, int(bands))
+    band_by_strength = {}
+    for index, strength in enumerate(positive_strengths):
+        band = 1 + math.floor(index * band_count / len(positive_strengths))
+        band_by_strength[strength] = float(min(band, band_count))
+
+    return {
+        edge: band_by_strength[strength]
+        for edge, strength in strengths_by_edge.items()
+    }
+
+
+# Alpha encodes edge strength so dense weak connections remain visible without drowning stronger structure.
+def edge_alpha_values(graph, *, min_alpha=0.05, max_alpha=0.75):
+    strengths_by_edge = {
+        (u, v): abs(float(edge_data["weight"]))
+        for u, v, edge_data in graph.edges(data=True)
+    }
+    positive_strengths = [
+        strength
+        for strength in strengths_by_edge.values()
+        if strength > 0.0
+    ]
+    if not positive_strengths:
+        return {edge: float(min_alpha) for edge in strengths_by_edge}
+
+    low = min(positive_strengths)
+    high = max(positive_strengths)
+    if high == low:
+        alpha = (float(min_alpha) + float(max_alpha)) / 2.0
+        return {edge: alpha for edge in strengths_by_edge}
+
+    return {
+        edge: float(min_alpha)
+        + (float(max_alpha) - float(min_alpha)) * ((strength - low) / (high - low))
+        for edge, strength in strengths_by_edge.items()
+    }
+
+
+def banded_layout_graph(graph, *, bands=4, include_negative=False):
+    layout_graph = nx.Graph()
+    layout_graph.add_nodes_from(graph.nodes(data=True))
+    band_by_edge = rank_banded_layout_weights(graph, bands=bands)
+
+    for u, v, edge_data in graph.edges(data=True):
+        weight = float(edge_data["weight"])
+        sign = 1 if weight > 0.0 else -1 if weight < 0.0 else 0
+        if sign < 0 and not include_negative:
+            continue
+        strength = abs(weight)
+        if strength <= 0.0:
+            continue
+        layout_graph.add_edge(u, v, layout_weight=band_by_edge[(u, v)])
+
+    return layout_graph
+
+
+def normalize_positions(positions):
+    if not positions:
+        return positions
+
+    nodes = list(positions)
+    points = np.asarray([positions[node] for node in nodes], dtype=float)
+    points -= points.mean(axis=0)
+    span = np.ptp(points, axis=0).max()
+    if span > 0.0:
+        points /= span
+    return {
+        node: points[index]
+        for index, node in enumerate(nodes)
+    }
+
+
+def relax_node_overlap(positions, *, node_count, max_passes=20):
+    if len(positions) < 2:
+        return positions
+
+    nodes = list(positions)
+    points = np.asarray([positions[node] for node in nodes], dtype=float)
+    target_distance = max(
+        NODE_OVERLAP_MIN_DISTANCE,
+        NODE_OVERLAP_DISTANCE_SCALE / math.sqrt(max(int(node_count), 1)),
+    )
+    max_step = target_distance * 0.25
+
+    for _ in range(int(max_passes)):
+        movement = np.zeros_like(points)
+        moved = False
+        for first_index in range(len(points)):
+            deltas = points[first_index] - points[first_index + 1 :]
+            distances = np.linalg.norm(deltas, axis=1)
+            too_close = distances < target_distance
+            if not np.any(too_close):
+                continue
+
+            close_offsets = np.where(too_close)[0]
+            for offset in close_offsets:
+                second_index = first_index + 1 + int(offset)
+                distance = distances[offset]
+                if distance == 0.0:
+                    angle = (first_index + second_index + 1) * GOLDEN_ANGLE_RADIANS
+                    direction = np.array([math.cos(angle), math.sin(angle)])
+                else:
+                    direction = deltas[offset] / distance
+
+                push = min((target_distance - distance) * 0.35, max_step)
+                movement[first_index] += direction * push
+                movement[second_index] -= direction * push
+                moved = True
+
+        if not moved:
+            break
+        step_lengths = np.linalg.norm(movement, axis=1)
+        oversized = step_lengths > max_step
+        if np.any(oversized):
+            movement[oversized] *= (max_step / step_lengths[oversized])[:, None]
+        points += movement
+
+    return normalize_positions(
+        {
+            node: points[index]
+            for index, node in enumerate(nodes)
+        }
+    )
+
+
+def repel_negative_edges(positions, graph, *, max_passes=40):
+    negative_edges = [
+        (u, v, abs(float(edge_data["weight"])))
+        for u, v, edge_data in graph.edges(data=True)
+        if float(edge_data["weight"]) < 0.0
+    ]
+    if not negative_edges:
+        return positions
+
+    nodes = list(positions)
+    node_index = {
+        node: index
+        for index, node in enumerate(nodes)
+    }
+    points = np.asarray([positions[node] for node in nodes], dtype=float)
+    band_by_edge = rank_banded_layout_weights(graph)
+    target_distance = NEGATIVE_EDGE_DISTANCE_SCALE / math.sqrt(max(len(nodes), 1))
+    max_step = target_distance * 0.18
+
+    for _ in range(int(max_passes)):
+        movement = np.zeros_like(points)
+        for u, v, _ in negative_edges:
+            first_index = node_index[u]
+            second_index = node_index[v]
+            delta = points[first_index] - points[second_index]
+            distance = np.linalg.norm(delta)
+            if distance == 0.0:
+                angle = (first_index + second_index + 1) * GOLDEN_ANGLE_RADIANS
+                direction = np.array([math.cos(angle), math.sin(angle)])
+            else:
+                direction = delta / distance
+
+            desired_distance = target_distance * band_by_edge[(u, v)]
+            if distance >= desired_distance:
+                continue
+
+            push = min((desired_distance - distance) * 0.16, max_step)
+            movement[first_index] += direction * push
+            movement[second_index] -= direction * push
+
+        step_lengths = np.linalg.norm(movement, axis=1)
+        if not np.any(step_lengths > 0.0):
+            break
+        oversized = step_lengths > max_step
+        if np.any(oversized):
+            movement[oversized] *= (max_step / step_lengths[oversized])[:, None]
+        points += movement
+
+    return normalize_positions(
+        {
+            node: points[index]
+            for index, node in enumerate(nodes)
+        }
+    )
+
+
+def compute_graph_layout(
+    graph,
+    *,
+    seed=0,
+    backend="spring",
+    negative_mode="render_only",
+):
+    if negative_mode not in {"render_only", "repel"}:
+        raise NotImplementedError(f"Unsupported negative mode: {negative_mode}")
+    if graph.number_of_nodes() == 0:
+        return {}
+
+    node_count = graph.number_of_nodes()
+    layout_k = SPRING_LAYOUT_K_SCALE / math.sqrt(max(node_count, 1))
+
+    if backend == "spring":
+        layout_graph = banded_layout_graph(graph, include_negative=False)
+        positions = nx.spring_layout(
+            layout_graph,
+            weight="layout_weight",
+            seed=seed,
+            k=layout_k,
+            iterations=300,
+            scale=2.0,
+        )
+    elif backend == "spectral":
+        layout_graph = banded_layout_graph(graph, include_negative=False)
+        if layout_graph.number_of_edges() == 0:
+            positions = nx.spring_layout(
+                layout_graph,
+                weight=None,
+                seed=seed,
+                k=layout_k,
+                iterations=300,
+                scale=2.0,
+            )
+        else:
+            positions = nx.spectral_layout(
+                layout_graph,
+                weight="layout_weight",
+                scale=2.0,
+            )
+    elif backend == "shell":
+        layout_graph = banded_layout_graph(graph, include_negative=False)
+        positions = nx.shell_layout(layout_graph, scale=2.0)
+    else:
+        raise NotImplementedError(f"Unsupported layout backend: {backend}")
+
+    positions = normalize_positions(positions)
+    if negative_mode == "repel":
+        positions = repel_negative_edges(positions, graph)
+    return relax_node_overlap(positions, node_count=node_count)
+
+
+def graph_plot_style(node_count):
+    count = max(int(node_count), 1)
+    density_scale = math.sqrt(count)
+    return {
+        "node_size": max(28.0, min(420.0, 3800.0 / density_scale)),
+        "font_size": max(2.8, min(8.5, 42.0 / density_scale)),
+        "node_linewidth": max(0.2, min(0.8, 4.5 / density_scale)),
+        "label_alpha": max(0.28, min(0.95, 16.0 / density_scale)),
+        "edge_width": max(0.25, min(1.15, 7.5 / density_scale)),
+    }
+
+
+def draw_signed_strength_edges(axis, graph, positions, *, base_width=0.8):
+    alpha_by_edge = edge_alpha_values(graph)
+    edge_groups = {
+        1: {"edges": [], "colors": [], "style": "solid"},
+        -1: {"edges": [], "colors": [], "style": "dashed"},
+    }
+    color_by_sign = {
+        1: "#4f7cac",
+        -1: "#c85a54",
+    }
+
+    for u, v, edge_data in graph.edges(data=True):
+        weight = float(edge_data["weight"])
+        sign = 1 if weight > 0.0 else -1 if weight < 0.0 else 0
+        if sign == 0:
+            continue
+        edge = (u, v)
+        edge_groups[sign]["edges"].append(edge)
+        edge_groups[sign]["colors"].append(
+            to_rgba(color_by_sign[sign], alpha_by_edge[edge])
+        )
+
+    for edge_group in edge_groups.values():
+        if not edge_group["edges"]:
+            continue
+        nx.draw_networkx_edges(
+            graph,
+            positions,
+            edgelist=edge_group["edges"],
+            edge_color=edge_group["colors"],
+            width=base_width,
+            style=edge_group["style"],
+            ax=axis,
+        )
+
+
+def save_graph_plot(
+    graph,
+    communities_df,
+    output_path,
+    *,
+    title,
+    seed=0,
+    layout_backend="spring",
+    negative_mode="render_only",
+):
+    # Plot setup
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     community_by_node = communities_df.set_index("node")["community"].to_dict()
@@ -372,32 +859,38 @@ def save_graph_plot(graph, communities_df, output_path, *, title, seed=0):
         community_id: color_map(index % color_map.N)
         for index, community_id in enumerate(community_ids)
     }
-    positions = nx.spring_layout(graph, weight="weight", seed=seed)
+
+    # Layout
+    positions = compute_graph_layout(
+        graph,
+        seed=seed,
+        backend=layout_backend,
+        negative_mode=negative_mode,
+    )
+    style = graph_plot_style(graph.number_of_nodes())
     node_colors = [colors[community_by_node[node]] for node in graph.nodes]
 
-    plt.figure(figsize=(24, 20))
-    nx.draw_networkx_edges(
-        graph,
-        positions,
-        edge_color="#8c8c8c",
-        alpha=0.45,
-        width=1.1,
-    )
+    # Drawing
+    figure, axis = plt.subplots(figsize=(24, 20))
+    draw_signed_strength_edges(axis, graph, positions, base_width=style["edge_width"])
     nx.draw_networkx_nodes(
         graph,
         positions,
         node_color=node_colors,
-        node_size=420,
+        node_size=style["node_size"],
         edgecolors="black",
-        linewidths=0.6,
+        linewidths=style["node_linewidth"],
+        ax=axis,
     )
     nx.draw_networkx_labels(
         graph,
         positions,
         labels={node: str(node) for node in graph.nodes},
-        font_size=8,
+        font_size=style["font_size"],
+        alpha=style["label_alpha"],
+        ax=axis,
     )
-    plt.legend(
+    axis.legend(
         handles=[
             Patch(
                 facecolor=colors[community_id],
@@ -411,82 +904,109 @@ def save_graph_plot(graph, communities_df, output_path, *, title, seed=0):
         frameon=True,
         fontsize=11,
     )
-    plt.title(title, fontsize=22, pad=18)
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=250, bbox_inches="tight")
-    plt.close()
+    axis.set_title(title, fontsize=22, pad=18)
+    axis.axis("off")
+
+    # Save
+    figure.tight_layout()
+    figure.savefig(output_path, dpi=250, bbox_inches="tight")
+    plt.close(figure)
 
 
-def save_k_core_plot(graph, k_core_nodes_df, output_path, *, title, seed=0):
-    import matplotlib
-
-    matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch
-
+def save_k_core_plot(
+    graph,
+    k_core_nodes_df,
+    output_path,
+    *,
+    title,
+    seed=0,
+    layout_backend="spring",
+    negative_mode="render_only",
+):
+    # Plot setup
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    k_values = sorted(k_core_nodes_df["k"].unique())
+    layers = distinct_k_core_layers(graph, k_core_nodes_df)
+    k_values = [layer["k_values"][0] for layer in layers]
     color_map = plt.colormaps["viridis"]
     colors = {
         k: color_map(index / max(len(k_values) - 1, 1))
         for index, k in enumerate(k_values)
     }
-    positions = nx.spring_layout(graph, weight="weight", seed=seed)
 
-    plt.figure(figsize=(24, 20))
-    nx.draw_networkx_edges(
+    # Layout and hulls
+    positions = compute_graph_layout(
+        graph,
+        seed=seed,
+        backend=layout_backend,
+        negative_mode=negative_mode,
+    )
+    style = graph_plot_style(graph.number_of_nodes())
+    position_array = np.asarray(list(positions.values()), dtype=float)
+    layout_span = np.ptp(position_array, axis=0).max() if len(position_array) else 1.0
+    hull_padding = max(layout_span * 0.045, 0.04)
+
+    # Drawing
+    figure, axis = plt.subplots(figsize=(24, 20))
+    for hull in k_core_component_hulls(
         graph,
         positions,
-        edge_color="#8c8c8c",
-        alpha=0.45,
-        width=1.1,
-    )
+        k_core_nodes_df,
+        hull_padding,
+    ):
+        k = hull["k_values"][0]
+        axis.add_patch(
+            Polygon(
+                hull["polygon"],
+                closed=True,
+                facecolor=colors[k],
+                edgecolor=colors[k],
+                alpha=0.2,
+                linewidth=1.2,
+                zorder=0,
+            )
+        )
+
+    draw_signed_strength_edges(axis, graph, positions, base_width=style["edge_width"])
     nx.draw_networkx_nodes(
         graph,
         positions,
         node_color="#f2f2f2",
-        node_size=300,
+        node_size=style["node_size"] * 0.85,
         edgecolors="#555555",
-        linewidths=0.6,
+        linewidths=style["node_linewidth"],
+        ax=axis,
     )
-    for index, k in enumerate(k_values):
-        k_nodes = k_core_nodes_df[k_core_nodes_df["k"] == k]["node"].tolist()
-        nx.draw_networkx_nodes(
-            graph,
-            positions,
-            nodelist=k_nodes,
-            node_color="none",
-            node_size=460 + index * 150,
-            edgecolors=colors[k],
-            linewidths=2.0,
-        )
     nx.draw_networkx_labels(
         graph,
         positions,
         labels={node: str(node) for node in graph.nodes},
-        font_size=8,
+        font_size=style["font_size"],
+        alpha=style["label_alpha"],
+        ax=axis,
     )
-    plt.legend(
+    axis.legend(
         handles=[
             Patch(
-                facecolor="none",
-                edgecolor=colors[k],
-                label=f"k={k}",
+                facecolor=colors[layer["k_values"][0]],
+                edgecolor=colors[layer["k_values"][0]],
+                alpha=0.2,
+                label=k_core_layer_label(layer["k_values"]),
             )
-            for k in k_values
+            for layer in layers
         ],
         loc="center left",
         bbox_to_anchor=(1.01, 0.5),
         frameon=True,
         fontsize=11,
     )
-    plt.title(title, fontsize=22, pad=18)
-    plt.axis("off")
-    plt.tight_layout()
-    plt.savefig(output_path, dpi=250, bbox_inches="tight")
-    plt.close()
+    axis.set_title(title, fontsize=22, pad=18)
+    axis.axis("off")
+
+    # Save
+    figure.tight_layout()
+    figure.savefig(output_path, dpi=250, bbox_inches="tight")
+    plt.close(figure)
 
 
 def neuron_report_frame(communities_df, formula_dataframe, degrees_df):
