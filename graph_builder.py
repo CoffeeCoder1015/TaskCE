@@ -24,6 +24,7 @@ captured = load_captured_activations(results_path)
 
 top_percent = 0.001
 min_neighbors = 3
+min_community_size = 2
 pipeline = "leiden"
 layout_backend = "spring"
 negative_mode = "render_only"
@@ -64,7 +65,11 @@ def graph_pipeline(
         sparsifying_functions[pipeline],
         searched_formulas,
     )
-    communities = analyze_communities(graph, pipeline)
+    communities = analyze_communities(
+        graph,
+        pipeline,
+        min_community_size=min_community_size,
+    )
     degrees = analyze_degrees(graph)
     hubs = analyze_hubs(degrees, communities)
     community_atomics = analyze_community_atomic_frequencies(graph, communities)
