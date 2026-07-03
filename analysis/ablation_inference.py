@@ -23,6 +23,44 @@ def make_ablation_hook(neuron_ids):
 
     return ablation_hook
 
+
+def resolve_ablation_layer(model, layer):
+    named_layers = [
+        (name, module)
+        for name, module in model.named_modules()
+        if name
+    ]
+    layer_by_name = dict(named_layers)
+
+    if isinstance(layer, str):
+        resolved_path = resolve_ablation_layer_path(layer_by_name, layer)
+        resolved_module = layer_by_name[resolved_path]
+    else:
+        resolved_path, resolved_module = named_layers[layer]
+
+    return resolved_module, resolved_path
+
+
+def resolve_ablation_layer_path(layer_by_name, layer):
+    if layer in layer_by_name:
+        return layer
+
+    suffix_matches = [
+        name
+        for name in layer_by_name
+        if name.endswith(f".{layer}")
+    ]
+    if len(suffix_matches) == 1:
+        return suffix_matches[0]
+    if suffix_matches:
+        raise KeyError(
+            f"Ablation layer {layer!r} matched multiple module paths: "
+            f"{suffix_matches}"
+        )
+
+    raise KeyError(layer)
+
+
 class AblationInferenceEngine:
     def __init__(
         self,
@@ -53,11 +91,7 @@ class AblationInferenceEngine:
         if lora_path is not None:
             self.model = PeftModel.from_pretrained(self.model, lora_path)
         self.model.eval()
-        named_layers = [(name, module) for name, module in self.model.named_modules() if name]
-        if isinstance(layer, str):
-            self.ablation_layer = dict(named_layers)[layer]
-        else:
-            self.ablation_layer = named_layers[layer][1]
+        self.ablation_layer, self.resolved_layer = resolve_ablation_layer(self.model, layer)
 
         formatted_dataset = task.dataset.map(task.data_formatter)
         self.prompts = formatted_dataset["prompt"]

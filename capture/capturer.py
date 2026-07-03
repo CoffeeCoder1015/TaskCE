@@ -39,14 +39,35 @@ def resolve_capture_layer(model, layer):
         for name, module in model.named_modules()
         if name
     ]
+    layer_by_name = dict(named_layers)
 
     if isinstance(layer, str):
-        resolved_path = layer
-        resolved_module = dict(named_layers)[layer]
+        resolved_path = resolve_capture_layer_path(layer_by_name, layer)
+        resolved_module = layer_by_name[resolved_path]
     else:
         resolved_path, resolved_module = named_layers[layer]
 
     return resolved_module, resolved_path
+
+
+def resolve_capture_layer_path(layer_by_name, layer):
+    if layer in layer_by_name:
+        return layer
+
+    suffix_matches = [
+        name
+        for name in layer_by_name
+        if name.endswith(f".{layer}")
+    ]
+    if len(suffix_matches) == 1:
+        return suffix_matches[0]
+    if suffix_matches:
+        raise KeyError(
+            f"Capture layer {layer!r} matched multiple module paths: "
+            f"{suffix_matches}"
+        )
+
+    raise KeyError(layer)
 
 
 def verify_padded_batch_shape(tokenized, batch_input_ids):
