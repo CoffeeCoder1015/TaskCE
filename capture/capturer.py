@@ -1,6 +1,4 @@
 import gc
-import os
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +8,7 @@ from tqdm import tqdm
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from capture.captureConfig import CaptureConfig
+from capture.lora_checkpoints import latest_checkpoint, latest_task_lora_checkpoints
 
 @dataclass
 class CapturedResults:
@@ -48,20 +47,6 @@ def resolve_capture_layer(model, layer):
         resolved_path, resolved_module = named_layers[layer]
 
     return resolved_module, resolved_path
-
-
-def checkpoint_sort_key(path):
-    name = os.path.basename(path.rstrip(os.sep))
-    match = re.fullmatch(r"checkpoint-(\d+)", name)
-    if match:
-        return 1, int(match.group(1)), name
-    return 0, name
-
-
-def latest_checkpoint(checkpoints):
-    if not checkpoints:
-        return None
-    return sorted(checkpoints, key=checkpoint_sort_key)[-1]
 
 
 def verify_padded_batch_shape(tokenized, batch_input_ids):
@@ -180,6 +165,8 @@ def Capture(
     tasks: list[CaptureConfig],
     layer: int | str,
     batch_size: int = 32,
+    lora_remote: bool = False,
+    lora_token: str | bool | None = None,
 ) -> dict:
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token is None:
@@ -205,26 +192,11 @@ def Capture(
         return results
 
     print("[Finetuned model activation capture]")
-    task_paths = {
-        path: os.path.join(lora_dir, path)
-        for path in os.listdir(lora_dir)
-        if os.path.isdir(os.path.join(lora_dir, path))
-    }
-    task_and_checkpts = {
-        task_name: [
-            os.path.join(task_path, path)
-            for path in os.listdir(task_path)
-            if os.path.isdir(os.path.join(task_path, path))
-        ]
-        for task_name, task_path in task_paths.items()
-    }
-
-    # Keep the eval convention: use the latest numbered checkpoint per task.
-    latest_checkpoints = {
-        task_name: latest_checkpoint(checkpoints)
-        for task_name, checkpoints in task_and_checkpts.items()
-        if checkpoints
-    }
+    latest_checkpoints = latest_task_lora_checkpoints(
+        lora_dir,
+        remote=lora_remote,
+        token=lora_token,
+    )
 
     for task in tasks:
         if task.name not in latest_checkpoints:
