@@ -134,7 +134,9 @@ if __name__ == "__main__":
     )
     print(claim_features[:30])
 
-    lora_dir = "../multitune/output"
+    lora_dir = "Heroi/multitune-lora-backup"
+    lora_remote = True
+    lora_token = os.environ.get("HF_TOKEN")
 
     output_dir = "results"
     search_config = searchConfig(
@@ -174,6 +176,8 @@ if __name__ == "__main__":
             CaptureConfig("claim", vitaminc, format_vitaminc_for_capture),
         ],
         layer=-2,
+        lora_remote=lora_remote,
+        lora_token=lora_token,
     )
     save_captured_activations(captured_results, output_dir)
     save_activation_diagnostics(captured_results, search_tasks, output_dir)
@@ -199,7 +203,14 @@ if __name__ == "__main__":
             config=search_config,
         )
 
-        classification_weights = get_classification_weights( model_id, lora_dir, name, task["class_token_ids"],)
+        classification_weights = get_classification_weights(
+            model_id,
+            lora_dir,
+            name,
+            task["class_token_ids"],
+            lora_remote=lora_remote,
+            lora_token=lora_token,
+        )
         weight_column_names = tuple( f"weight_{label.replace(' ', '_')}" for label in task["labels"])
 
         dataframe = build_neuron_search_results_dataframe(
@@ -232,7 +243,12 @@ if __name__ == "__main__":
             dataset=task["dataset"],
             data_formatter=task["data_formatter"],
         )
-        lora_path = latest_task_lora_checkpoint(lora_dir, name)
+        lora_path = latest_task_lora_checkpoint(
+            lora_dir,
+            name,
+            remote=lora_remote,
+            token=lora_token,
+        )
         inference_engine = AblationInferenceEngine(
             model_id=model_id,
             task=ablation_task,

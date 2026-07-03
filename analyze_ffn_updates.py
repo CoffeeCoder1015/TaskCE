@@ -122,11 +122,23 @@ if __name__ == "__main__":
         },
     ]
 
-    lora_dir = "../multitune/output"
+    lora_dir = "Heroi/multitune-lora-backup"
+    lora_remote = True
+    lora_token = os.environ.get("HF_TOKEN")
     model_variants = {
         "base": None,
-        "snli_finetuned": latest_task_lora_checkpoint(lora_dir, "snli"),
-        "claim_finetuned": latest_task_lora_checkpoint(lora_dir, "claim"),
+        "snli_finetuned": latest_task_lora_checkpoint(
+            lora_dir,
+            "snli",
+            remote=lora_remote,
+            token=lora_token,
+        ),
+        "claim_finetuned": latest_task_lora_checkpoint(
+            lora_dir,
+            "claim",
+            remote=lora_remote,
+            token=lora_token,
+        ),
     }
 
     ffn_update_layer = "model.layers.8.feed_forward"

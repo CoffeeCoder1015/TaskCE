@@ -1,3 +1,4 @@
+import os
 from collections import Counter
 
 from datasets import load_dataset
@@ -126,9 +127,15 @@ snli_examples = load_dataset("snli", split="validation")
 fallacy_examples = load_dataset("tasksource/logical-fallacy", split="dev")
 vitaminc_examples = load_dataset("tals/vitaminc", split="validation[:10_000]")
 
+lora_dir = "Heroi/multitune-lora-backup"
+lora_remote = True
+lora_token = os.environ.get("HF_TOKEN")
+
 capture_results = Capture(
     model_id="LiquidAI/LFM2.5-1.2B-Thinking",
-    lora_dir="../multitune/output", # Assumed to be used in conjunction with https://github.com/CoffeeCoder1015/multitune
+    lora_dir=lora_dir,
+    lora_remote=lora_remote,
+    lora_token=lora_token,
     tasks=[
         CaptureConfig(
             name="snli",
