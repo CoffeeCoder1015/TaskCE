@@ -1,3 +1,5 @@
+import os
+
 from datasets import load_dataset
 from evaluation import Evaluate, EvalConfig
 
@@ -93,10 +95,15 @@ def extract_fallacy(content):
 def extract_vitaminc(content):
     return extract_first_class(content, VITAMINC_LABELS)
 
+lora_dir = "Heroi/multitune-lora-backup"
+lora_remote = True
+lora_token = os.environ.get("HF_TOKEN")
 
 Evaluate(
     model_id="LiquidAI/LFM2.5-1.2B-Thinking",
-    lora_dir="../multitune/output", # Assumed to be used in conjunction with https://github.com/CoffeeCoder1015/multitune
+    lora_dir=lora_dir,
+    lora_remote=lora_remote,
+    lora_token=lora_token,
     tasks=[
         EvalConfig(
             name="snli",

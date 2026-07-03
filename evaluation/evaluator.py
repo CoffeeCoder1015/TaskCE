@@ -1,12 +1,13 @@
 from collections import Counter
 import gc
-import os
 
 from evaluation.evalConfig import EvalConfig
 import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer, pipeline
 from tqdm import tqdm
 from peft import PeftModel
+
+from capture.lora_checkpoints import latest_task_lora_checkpoints
 
 
 def evaluate_predictions(prediction, answer):
@@ -76,7 +77,14 @@ def eval_task(model_id, tokenizer, task, lora_path=None, batch_size=128):
     return stats
 
 
-def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
+def Evaluate(
+    model_id: str,
+    lora_dir: str,
+    tasks: list[EvalConfig],
+    *,
+    lora_remote: bool = False,
+    lora_token: str | bool | None = None,
+):
     tokenizer = AutoTokenizer.from_pretrained(model_id)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -89,23 +97,11 @@ def Evaluate(model_id: str,lora_dir: str, tasks: list[EvalConfig]):
         print_results(task.name, stats)
 
     print("[Finetuned model evaluation]")
-    task_paths = {
-        path: os.path.join(lora_dir, path)
-        for path in os.listdir(lora_dir)
-        if os.path.isdir(os.path.join(lora_dir, path))
-    }
-    task_and_checkpts = {
-        task_name: [
-            os.path.join(task_path, path)
-            for path in os.listdir(task_path)
-            if os.path.isdir(os.path.join(task_path, path))
-        ]
-        for task_name, task_path in task_paths.items()
-    }
-    
-    # TODO: test on time dimension as well but currently using latest
-    latest_checkpoints = {k: sorted(v)[-1] for k,v in task_and_checkpts.items() if v}
-
+    latest_checkpoints = latest_task_lora_checkpoints(
+        lora_dir,
+        remote=lora_remote,
+        token=lora_token,
+    )
 
     for task in tasks:
         if task.name not in latest_checkpoints:
