@@ -3,6 +3,7 @@ import torch
 
 from capture.capturer import (
     latest_checkpoint,
+    resolve_capture_layer,
     verify_padded_batch_shape,
 )
 
@@ -38,3 +39,46 @@ def test_verify_padded_batch_shape_rejects_joined_batch():
     tokenized = {"input_ids": torch.zeros((1, 8), dtype=torch.long)}
     with pytest.raises(ValueError, match="batch size"):
         verify_padded_batch_shape(tokenized, [[1, 2, 3], [4, 5]])
+
+
+class FakeLayer:
+    pass
+
+
+class FakeModel:
+    def __init__(self, module_names):
+        self.modules = [(name, FakeLayer()) for name in module_names]
+
+    def named_modules(self):
+        yield "", self
+        yield from self.modules
+
+
+def test_resolve_capture_layer_accepts_exact_module_path():
+    model = FakeModel(["model.layers.8.feed_forward"])
+
+    module, path = resolve_capture_layer(model, "model.layers.8.feed_forward")
+
+    assert module is model.modules[0][1]
+    assert path == "model.layers.8.feed_forward"
+
+
+def test_resolve_capture_layer_accepts_peft_prefixed_module_path():
+    model = FakeModel(["base_model.model.model.layers.8.feed_forward"])
+
+    module, path = resolve_capture_layer(model, "model.layers.8.feed_forward")
+
+    assert module is model.modules[0][1]
+    assert path == "base_model.model.model.layers.8.feed_forward"
+
+
+def test_resolve_capture_layer_rejects_ambiguous_suffix_matches():
+    model = FakeModel(
+        [
+            "left.model.layers.8.feed_forward",
+            "right.model.layers.8.feed_forward",
+        ]
+    )
+
+    with pytest.raises(KeyError, match="matched multiple module paths"):
+        resolve_capture_layer(model, "model.layers.8.feed_forward")
