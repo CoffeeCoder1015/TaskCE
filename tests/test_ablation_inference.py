@@ -71,9 +71,13 @@ class FakeLogits:
 
 class FakeModel:
     device = "cpu"
+    module_names = ("layer",)
 
     def __init__(self):
-        self.layer = FakeLayer()
+        self.layers = {
+            name: FakeLayer()
+            for name in self.module_names
+        }
         self.forward_kwargs = None
 
     @classmethod
@@ -85,7 +89,7 @@ class FakeModel:
 
     def named_modules(self):
         yield "", self
-        yield "layer", self.layer
+        yield from self.layers.items()
 
     def __call__(self, **kwargs):
         self.forward_kwargs = kwargs
@@ -139,3 +143,41 @@ def test_ablation_inference_uses_final_token_class_logits(monkeypatch):
         "return_tensors": "pt",
     }
     assert engine.model.forward_kwargs["device"] == "cpu"
+
+
+def test_ablation_inference_resolves_peft_prefixed_layer(monkeypatch):
+    monkeypatch.setitem(sys.modules, "torch", fake_torch)
+    monkeypatch.setitem(sys.modules, "peft", types.SimpleNamespace(PeftModel=object))
+    monkeypatch.setitem(
+        sys.modules,
+        "transformers",
+        types.SimpleNamespace(AutoModelForCausalLM=FakeModel, AutoTokenizer=FakeTokenizer),
+    )
+
+    original_module_names = FakeModel.module_names
+    FakeModel.module_names = ("base_model.model.model.layers.8.feed_forward",)
+    try:
+        ablation_inference = importlib.import_module("analysis.ablation_inference")
+        ablation_inference = importlib.reload(ablation_inference)
+
+        task = types.SimpleNamespace(
+            name="fever",
+            dataset=FakeDataset(),
+            data_formatter=lambda row: row,
+        )
+
+        engine = ablation_inference.AblationInferenceEngine(
+            model_id="fake",
+            task=task,
+            layer="model.layers.8.feed_forward",
+            class_token_ids={
+                "supports": 11,
+                "refutes": 22,
+                "not enough info": 33,
+            },
+            batch_size=2,
+        )
+
+        assert engine.resolved_layer == "base_model.model.model.layers.8.feed_forward"
+    finally:
+        FakeModel.module_names = original_module_names
