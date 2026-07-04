@@ -1,0 +1,99 @@
+================================================================================
+ABLATION PRE-RUN ANALYSIS
+================================================================================
+
+Search result CSV: results_base/claim_beam_results.csv
+Total neurons: 2048
+Zero IoU neurons: 216
+IoU > 0 neurons: 1832
+
+IoU distribution:
+count    2048.000000
+mean        0.161869
+std         0.083715
+min         0.000000
+25%         0.122928
+50%         0.155655
+75%         0.205156
+max         0.503077
+
+Top 10 formulas:
+formula
+LOW_ACTS_PRUNED                                                                                                                                       216
+(claim:ratings OR claim:recoveries OR evidence:films OR evidence:previous OR evidence:production)                                                       2
+(evidence:canada AND evidence:territories AND (NOT claim:equalizer) AND (NOT claim:north) AND (NOT evidence:simon))                                     1
+(claim:liftback OR (evidence:cases AND (NOT claim:resulting) AND (NOT evidence:europe) AND (NOT evidence:korea)))                                       1
+(claim:million AND evidence:canada AND (NOT claim:final) AND (NOT claim:north) AND (NOT claim:territories))                                             1
+(claim:reviewers OR (evidence:approval AND evidence:average AND (NOT claim:preacher) AND (NOT evidence:'')))                                            1
+((NOT evidence:football) AND (NOT evidence:son) AND (evidence:103 OR evidence:born OR evidence:lil))                                                    1
+((NOT evidence:29.4) AND (evidence:4.3/10 OR evidence:canada OR evidence:know) AND (evidence:4.3/10 OR evidence:know OR evidence:production))           1
+((NOT claim:51) AND (claim:rotten OR evidence:aggregator OR evidence:keyboard) AND (evidence:aggregator OR evidence:average OR evidence:keyboard))      1
+(evidence:average AND evidence:tomatoes AND (NOT claim:average) AND (NOT claim:rated) AND (NOT evidence:77))                                            1
+
+================================================================================
+GROUP SUMMARY
+================================================================================
+     group  n_neurons  iou_min  iou_max  iou_mean
+      good       1832 0.069392 0.503077  0.180954
+       bad        216 0.000000 0.000000  0.000000
+iou_ranked       2048 0.000000 0.503077  0.161869
+
+================================================================================
+IOU BAND BOUNDARIES
+================================================================================
+     group  percentile  start_index  end_index  n_neurons  iou_min  iou_max
+      good         0.1            0        184        184 0.271318 0.503077
+      good         0.2          184        367        183 0.226345 0.271229
+      good         0.3          367        550        183 0.201011 0.226300
+      good         0.4          550        733        183 0.180124 0.200730
+      good         0.5          733        916        183 0.163578 0.179907
+      good         0.6          916       1100        184 0.150909 0.163471
+      good         0.7         1100       1283        183 0.138996 0.150890
+      good         0.8         1283       1466        183 0.127677 0.138983
+      good         0.9         1466       1649        183 0.114099 0.127660
+      good         1.0         1649       1832        183 0.069392 0.114072
+       bad         0.1            0         22         22 0.000000 0.000000
+       bad         0.2           22         44         22 0.000000 0.000000
+       bad         0.3           44         65         21 0.000000 0.000000
+       bad         0.4           65         87         22 0.000000 0.000000
+       bad         0.5           87        108         21 0.000000 0.000000
+       bad         0.6          108        130         22 0.000000 0.000000
+       bad         0.7          130        152         22 0.000000 0.000000
+       bad         0.8          152        173         21 0.000000 0.000000
+       bad         0.9          173        195         22 0.000000 0.000000
+       bad         1.0          195        216         21 0.000000 0.000000
+iou_ranked         0.1            0        205        205 0.265141 0.503077
+iou_ranked         0.2          205        410        205 0.218069 0.265060
+iou_ranked         0.3          410        615        205 0.192531 0.217840
+iou_ranked         0.4          615        820        205 0.172487 0.192473
+iou_ranked         0.5          820       1024        204 0.155660 0.172414
+iou_ranked         0.6         1024       1229        205 0.142551 0.155650
+iou_ranked         0.7         1229       1434        205 0.129755 0.142541
+iou_ranked         0.8         1434       1639        205 0.115116 0.129630
+iou_ranked         0.9         1639       1844        205 0.000000 0.114891
+iou_ranked         1.0         1844       2048        204 0.000000 0.000000
+
+================================================================================
+TOP WEIGHT CONTRIBUTIONS
+================================================================================
+ neuron                                                                                                                                                         formula      iou  weight_supports  weight_refutes  weight_not_enough_info  total_weight  dominant_class
+    957                                                                   ((NOT claim:globally) AND (claim:canada OR claim:met OR evidence:place OR evidence:reported)) 0.151442        -0.073242       -0.065918               -0.022095      0.161255        supports
+    962                                                  (evidence:tomatoes AND (NOT claim:averaged) AND (NOT claim:rated) AND (NOT evidence:'') AND (NOT evidence:89)) 0.287615         0.060547        0.052734                0.024658      0.137939        supports
+    378                                                                         (claim:greggs OR evidence:2d OR evidence:american OR evidence:nfl OR evidence:stylized) 0.143460        -0.057617       -0.059326               -0.013855      0.130798         refutes
+   1895                                                                           (claim:'' OR claim:final OR evidence:consisting OR evidence:david OR evidence:mccall) 0.167396        -0.050293       -0.036865               -0.027710      0.114868        supports
+    925 (evidence:partner OR (claim:film AND (NOT evidence:grossed) AND (NOT evidence:reviews)) OR (claim:movie AND (NOT evidence:grossed) AND (NOT evidence:reviews))) 0.088066        -0.008728       -0.055664               -0.049805      0.114197         refutes
+    150                                                                (claim:yamla OR evidence:grandpa OR evidence:mobility OR (claim:earned AND (NOT evidence:film))) 0.159563        -0.032959       -0.046631               -0.033691      0.113281         refutes
+   1000                                                                         (claim:r OR evidence:brady OR evidence:plays OR (evidence:total AND (NOT claim:total))) 0.154659        -0.053223       -0.029785               -0.029785      0.112793        supports
+    935                                                                                                                                                 LOW_ACTS_PRUNED 0.000000        -0.043213       -0.042725               -0.023193      0.109131        supports
+   1800                                                                                                                                                 LOW_ACTS_PRUNED 0.000000        -0.041748       -0.041748               -0.023193      0.106689        supports
+    397                                                       ((NOT evidence:league) AND (claim:american OR evidence:born OR evidence:percussion OR evidence:software)) 0.197556        -0.025391        0.056885                0.023682      0.105957         refutes
+    720          (claim:race OR (claim:grossed AND (NOT evidence:million)) OR (claim:recovered AND (NOT evidence:million)) OR (claim:yamla AND (NOT evidence:million))) 0.156069        -0.033203       -0.045898               -0.026733      0.105835         refutes
+   1740                                             (evidence:average AND evidence:tomatoes AND (NOT claim:alice) AND (NOT evidence:10) AND (NOT evidence:aggregation)) 0.356061         0.055420        0.013306                0.036865      0.105591        supports
+   1462             (evidence:till OR (claim:approval AND evidence:average AND (NOT evidence:season)) OR (claim:rating AND evidence:average AND (NOT evidence:season))) 0.228900         0.066895        0.021118                0.016113      0.104126        supports
+   1309                                                                         (claim:rubio OR evidence:century OR evidence:genre OR evidence:house OR evidence:south) 0.155920        -0.024658       -0.060791               -0.017578      0.103027         refutes
+   1106       (claim:domestic OR (claim:north AND (NOT claim:rating)) OR (evidence:massachusetts AND (NOT claim:rating)) OR (evidence:tomatoes AND (NOT claim:rating))) 0.125326         0.031982       -0.047119               -0.023315      0.102417         refutes
+   1510                                                                                                                                                 LOW_ACTS_PRUNED 0.000000         0.023804       -0.053467                0.024902      0.102173         refutes
+    755                                                                                                                                                 LOW_ACTS_PRUNED 0.000000        -0.027222       -0.034424               -0.039062      0.100708 not_enough_info
+    602                                                                         (claim:based OR evidence:cross OR evidence:friend OR evidence:known OR evidence:second) 0.128873         0.038330        0.036865                0.023193      0.098389        supports
+    465                                                                            (claim:know OR evidence:bands OR evidence:number OR evidence:original OR evidence:t) 0.129590         0.022461       -0.044922                0.028931      0.096313         refutes
+    301                                                             ((NOT claim:school) AND (claim:rating OR evidence:2d OR evidence:production OR evidence:recovered)) 0.175365        -0.038574       -0.043213                0.013916      0.095703         refutes
