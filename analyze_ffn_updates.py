@@ -14,7 +14,6 @@ from analysis.saving import (
 
 from capture.classification_weights import (
     get_classification_weights,
-    latest_task_lora_checkpoint,
 )
 from capture import Capture, CaptureConfig, save_captured_activations
 from capture.postprocessing import threshold, prune_min_acts
@@ -138,7 +137,7 @@ if __name__ == "__main__":
     lora_remote = True
     lora_token = os.environ.get("HF_TOKEN")
 
-    output_dir = "results"
+    output_dir = "results_base"
     search_config = searchConfig(
         formula_length=5,
         pruned_queue_size=10,
@@ -189,7 +188,7 @@ if __name__ == "__main__":
         alpha = task["alpha"]
         min_acts = task["min_acts"]
         features = task["features"]
-        activations = captured_results[name]["finetuned"]
+        activations = captured_results[name]["base"]
         task_output_dir = os.path.join(output_dir, name)
         binarized_activations, kept_activations, kept_neurons = post_process_activations(
             activations,
@@ -245,12 +244,7 @@ if __name__ == "__main__":
             dataset=task["dataset"],
             data_formatter=task["data_formatter"],
         )
-        lora_path = latest_task_lora_checkpoint(
-            lora_dir,
-            name,
-            remote=lora_remote,
-            token=lora_token,
-        )
+        lora_path = None
         inference_engine = AblationInferenceEngine(
             model_id=model_id,
             task=ablation_task,
