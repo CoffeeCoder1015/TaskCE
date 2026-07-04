@@ -43,20 +43,23 @@ def prepare_feature_vectors(feature_vectors, device):
     ]
 
 
-def batched_iou(neuron,binary_vecs):
+def batched_iou(neuron,binary_vecs,neuron_count=None):
     intersections = (binary_vecs & neuron).sum(dim=1)
-    unions = (binary_vecs | neuron).sum(dim=1)
+    if neuron_count is None:
+        neuron_count = neuron.sum()
+    unions = binary_vecs.sum(dim=1) + neuron_count - intersections
     raw_scores = intersections.float() / unions.clamp_min(1).float()
     return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
 
 def calculate_ious(neuron, vector_list, batch_size):
-    ious = []
+    output = []
+    neuron_count = neuron.sum()
     for i in range(0, len(vector_list), batch_size):
         batch = vector_list[i:i+batch_size]
         vectors = torch.stack(batch)
-        iou = batched_iou(neuron, vectors)
-        ious.extend(iou.tolist())
-    return ious
+        iou = batched_iou(neuron, vectors, neuron_count)
+        output.append(iou)
+    return torch.cat(output).detach().cpu().tolist()
 
 
 # Hash keys to not visit them again
@@ -279,8 +282,9 @@ def search_worker(activation_vectors,activation_indicies:list[int],feature_vecto
     for local_activation_index, global_activation_index in enumerate(activation_indicies):
         search_func = Search
         print(f"Running {search_func.__name__} for global index {global_activation_index}")
+        neuron_activation = activation_vectors[:,local_activation_index].contiguous()
         best_formula, best_score = search_func(
-            activation_vectors[:,local_activation_index],
+            neuron_activation,
             feature_vectors,
             config,
         )
