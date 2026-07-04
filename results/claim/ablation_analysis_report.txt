@@ -1,0 +1,99 @@
+================================================================================
+ABLATION PRE-RUN ANALYSIS
+================================================================================
+
+Search result CSV: results/claim_beam_results.csv
+Total neurons: 2048
+Zero IoU neurons: 93
+IoU > 0 neurons: 1955
+
+IoU distribution:
+count    2048.000000
+mean        0.141294
+std         0.059874
+min         0.000000
+25%         0.107685
+50%         0.134161
+75%         0.169862
+max         0.621739
+
+Top 10 formulas:
+formula
+LOW_ACTS_PRUNED                                                                                                                                                                93
+(evidence:103 OR (evidence:american AND (NOT claim:born)) OR (evidence:born AND (NOT claim:born)))                                                                              3
+(evidence:universal OR (evidence:american AND (NOT claim:born)) OR (evidence:born AND (NOT claim:born)))                                                                        2
+((NOT claim:collected) AND (claim:million OR evidence:7.8) AND (evidence:7.8 OR evidence:production) AND (evidence:7.8 OR (NOT evidence:40.8)))                                 1
+(claim:million AND evidence:production AND (NOT claim:movie) AND (NOT evidence:101.6) AND (NOT evidence:simon))                                                                 1
+((NOT evidence:77) AND (claim:million OR evidence:stillalice.htm) AND (evidence:production OR evidence:stillalice.htm) AND (evidence:stillalice.htm OR (NOT claim:profit)))     1
+(evidence:tomatoes AND (NOT claim:ratings) AND (NOT claim:reviewers) AND (NOT claim:simon) AND (NOT evidence:''))                                                               1
+(claim:million AND (evidence:2d OR evidence:production) AND (evidence:2d OR (NOT claim:film)))                                                                                  1
+(claim:traditional OR (claim:canada AND evidence:grossed) OR (evidence:disappointing AND evidence:grossed) OR (evidence:grossed AND evidence:simon))                            1
+(evidence:taiwan OR (evidence:merging AND (NOT evidence:17.6) AND (NOT evidence:october)) OR (evidence:production AND (NOT evidence:17.6) AND (NOT evidence:october)))          1
+
+================================================================================
+GROUP SUMMARY
+================================================================================
+     group  n_neurons  iou_min  iou_max  iou_mean
+      good       1955 0.063025 0.621739  0.148015
+       bad         93 0.000000 0.000000  0.000000
+iou_ranked       2048 0.000000 0.621739  0.141294
+
+================================================================================
+IOU BAND BOUNDARIES
+================================================================================
+     group  percentile  start_index  end_index  n_neurons  iou_min  iou_max
+      good         0.1            0        196        196 0.212465 0.621739
+      good         0.2          196        391        195 0.182266 0.212371
+      good         0.3          391        587        196 0.162234 0.182186
+      good         0.4          587        782        195 0.148997 0.162100
+      good         0.5          782        978        196 0.136936 0.148909
+      good         0.6          978       1173        195 0.125856 0.136833
+      good         0.7         1173       1369        196 0.115760 0.125815
+      good         0.8         1369       1564        195 0.106322 0.115708
+      good         0.9         1564       1760        196 0.096113 0.106291
+      good         1.0         1760       1955        195 0.063025 0.096085
+       bad         0.1            0         10         10 0.000000 0.000000
+       bad         0.2           10         19          9 0.000000 0.000000
+       bad         0.3           19         28          9 0.000000 0.000000
+       bad         0.4           28         38         10 0.000000 0.000000
+       bad         0.5           38         47          9 0.000000 0.000000
+       bad         0.6           47         56          9 0.000000 0.000000
+       bad         0.7           56         66         10 0.000000 0.000000
+       bad         0.8           66         75          9 0.000000 0.000000
+       bad         0.9           75         84          9 0.000000 0.000000
+       bad         1.0           84         93          9 0.000000 0.000000
+iou_ranked         0.1            0        205        205 0.210526 0.621739
+iou_ranked         0.2          205        410        205 0.179678 0.210191
+iou_ranked         0.3          410        615        205 0.160323 0.179598
+iou_ranked         0.4          615        820        205 0.146888 0.160133
+iou_ranked         0.5          820       1024        204 0.134222 0.146853
+iou_ranked         0.6         1024       1229        205 0.122468 0.134100
+iou_ranked         0.7         1229       1434        205 0.112733 0.122337
+iou_ranked         0.8         1434       1639        205 0.102941 0.112720
+iou_ranked         0.9         1639       1844        205 0.089227 0.102908
+iou_ranked         1.0         1844       2048        204 0.000000 0.089194
+
+================================================================================
+TOP WEIGHT CONTRIBUTIONS
+================================================================================
+ neuron                                                                                                                                                               formula      iou  weight_supports  weight_refutes  weight_not_enough_info  total_weight  dominant_class
+    957                                                              (evidence:born OR evidence:exchange OR evidence:great OR evidence:rhythm OR evidence:telecommunications) 0.160598        -0.073242       -0.065918               -0.022095      0.161255        supports
+    962                                                                          (claim:currently OR evidence:friend OR evidence:review OR evidence:sony OR evidence:youtube) 0.157399         0.060547        0.052734                0.024658      0.137939        supports
+    378                                                                    (claim:band OR (evidence:2 AND (NOT claim:canada)) OR (evidence:published AND (NOT claim:canada))) 0.103955        -0.057617       -0.059326               -0.013855      0.130798         refutes
+   1895                                                              ((NOT claim:million) AND (NOT claim:released) AND (claim:plays OR evidence:friend OR evidence:released)) 0.108911        -0.050293       -0.036865               -0.027710      0.114868        supports
+    925                                                                                (claim:cases OR evidence:composed OR evidence:performed OR evidence:win OR evidence:�) 0.081235        -0.008728       -0.055664               -0.049805      0.114197         refutes
+    150                                                                                     (claim:canada OR claim:mother OR claim:north OR claim:uk OR evidence:subscribers) 0.123377        -0.032959       -0.046631               -0.033691      0.113281         refutes
+   1000  (claim:averaged OR (claim:million AND (NOT evidence:night) AND (NOT evidence:released)) OR (evidence:weighted AND (NOT evidence:night) AND (NOT evidence:released))) 0.114664        -0.053223       -0.029785               -0.029785      0.112793        supports
+    935 (evidence:line OR (evidence:critics AND (NOT evidence:released) AND (NOT evidence:review)) OR (evidence:crore AND (NOT evidence:released) AND (NOT evidence:review))) 0.165420        -0.043213       -0.042725               -0.023193      0.109131        supports
+   1800     (evidence:lead OR (evidence:'' AND (NOT evidence:critics)) OR (evidence:4.3/10 AND (NOT evidence:critics)) OR (evidence:installments AND (NOT evidence:critics))) 0.096880        -0.041748       -0.041748               -0.023193      0.106689        supports
+    397                                                                        (claim:chapter OR evidence:lifetime OR evidence:till OR (claim:rotten AND (NOT claim:rating))) 0.179678        -0.025391        0.056885                0.023682      0.105957         refutes
+    720                                                     (evidence:richest OR (evidence:grossed AND evidence:states AND (NOT claim:america) AND (NOT evidence:september))) 0.223206        -0.033203       -0.045898               -0.026733      0.105835         refutes
+   1740                                                                               (claim:21st OR evidence:2d OR evidence:susan OR (evidence:'' AND (NOT evidence:based))) 0.173786         0.055420        0.013306                0.036865      0.105591        supports
+   1462                                                                  (claim:business OR claim:later OR evidence:winner OR (evidence:received AND (NOT evidence:million))) 0.143791         0.066895        0.021118                0.016113      0.104126        supports
+   1309                                                                          (claim:disliked OR evidence:american OR evidence:coach OR evidence:feast OR evidence:island) 0.109031        -0.024658       -0.060791               -0.017578      0.103027         refutes
+   1106                       (claim:big OR (claim:play AND (NOT evidence:reviews)) OR (evidence:'' AND (NOT evidence:reviews)) OR (evidence:new AND (NOT evidence:reviews))) 0.078445         0.031982       -0.047119               -0.023315      0.102417         refutes
+   1510                                                                                                                                                       LOW_ACTS_PRUNED 0.000000         0.023804       -0.053467                0.024902      0.102173         refutes
+    755                                                                (evidence:rhythm OR (evidence:'' AND (NOT evidence:based)) OR (evidence:new AND (NOT evidence:based))) 0.086391        -0.027222       -0.034424               -0.039062      0.100708 not_enough_info
+    602                                                                          (evidence:d OR evidence:extended OR evidence:founded OR evidence:hell OR evidence:sequences) 0.162625         0.038330        0.036865                0.023193      0.098389        supports
+    465               (claim:tim OR (claim:reviews AND (NOT evidence:5.6/10) AND (NOT evidence:critics)) OR (claim:u.s AND (NOT evidence:5.6/10) AND (NOT evidence:critics))) 0.122037         0.022461       -0.044922                0.028931      0.096313         refutes
+    481                                                                ((NOT claim:domestic) AND (NOT evidence:rating) AND (claim:dirty OR evidence:crore OR evidence:lloyd)) 0.122876         0.017212        0.022583                0.055908      0.095703 not_enough_info

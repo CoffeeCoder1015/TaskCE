@@ -1,0 +1,91 @@
+================================================================================
+ABLATION PRE-RUN ANALYSIS
+================================================================================
+
+Search result CSV: results/snli_beam_results.csv
+Total neurons: 2048
+Zero IoU neurons: 2
+IoU > 0 neurons: 2046
+
+IoU distribution:
+count    2048.000000
+mean        0.099308
+std         0.027901
+min         0.000000
+25%         0.080357
+50%         0.092243
+75%         0.110991
+max         0.284981
+
+Top 10 formulas:
+formula
+(hypothesis:asleep OR hypothesis:cat OR hypothesis:eating OR hypothesis:sleeping OR hypothesis:swimming)                                                                 4
+(hypothesis:black OR hypothesis:blue OR hypothesis:green OR hypothesis:wearing OR hypothesis:white)                                                                      4
+(hypothesis:asleep OR hypothesis:cat OR hypothesis:eating OR hypothesis:sleeping OR hypothesis:sleeps)                                                                   4
+(hypothesis:asleep OR hypothesis:eating OR hypothesis:sleeping OR hypothesis:sleeps OR hypothesis:swimming)                                                              3
+(hypothesis:cat OR hypothesis:eating OR hypothesis:eats OR hypothesis:sleeping OR hypothesis:sleeps)                                                                     3
+(hypothesis:asleep OR hypothesis:eating OR hypothesis:eats OR hypothesis:sleeping OR hypothesis:swimming)                                                                3
+(hypothesis:cat OR hypothesis:eating OR hypothesis:eats OR hypothesis:sits OR hypothesis:swimming)                                                                       3
+(hypothesis:humans OR (hypothesis:people AND (NOT premise:people) AND (NOT premise:person)) OR (hypothesis:person AND (NOT premise:people) AND (NOT premise:person)))    3
+((NOT premise:person) AND (hypothesis:human OR hypothesis:outdoors OR hypothesis:people OR hypothesis:person))                                                           3
+((NOT premise:people) AND (NOT premise:person) AND (hypothesis:human OR hypothesis:people OR hypothesis:person))                                                         3
+
+================================================================================
+GROUP SUMMARY
+================================================================================
+     group  n_neurons  iou_min  iou_max  iou_mean
+      good       2046  0.05693 0.284981  0.099405
+       bad          2  0.00000 0.000000  0.000000
+iou_ranked       2048  0.00000 0.284981  0.099308
+
+================================================================================
+IOU BAND BOUNDARIES
+================================================================================
+     group  percentile  start_index  end_index  n_neurons  iou_min  iou_max
+      good         0.1            0        205        205 0.137097 0.284981
+      good         0.2          205        410        205 0.117284 0.136865
+      good         0.3          410        614        204 0.105508 0.117260
+      good         0.4          614        819        205 0.097794 0.105402
+      good         0.5          819       1023        204 0.092323 0.097730
+      good         0.6         1023       1228        205 0.087039 0.092271
+      good         0.7         1228       1433        205 0.082895 0.086979
+      good         0.8         1433       1637        204 0.078309 0.082845
+      good         0.9         1637       1842        205 0.073034 0.078299
+      good         1.0         1842       2046        204 0.056930 0.073013
+       bad         0.1            0          1          1 0.000000 0.000000
+       bad         0.6            1          2          1 0.000000 0.000000
+iou_ranked         0.1            0        205        205 0.137097 0.284981
+iou_ranked         0.2          205        410        205 0.117284 0.136865
+iou_ranked         0.3          410        615        205 0.105402 0.117260
+iou_ranked         0.4          615        820        205 0.097730 0.105385
+iou_ranked         0.5          820       1024        204 0.092271 0.097723
+iou_ranked         0.6         1024       1229        205 0.086979 0.092216
+iou_ranked         0.7         1229       1434        205 0.082845 0.086957
+iou_ranked         0.8         1434       1639        205 0.078285 0.082830
+iou_ranked         0.9         1639       1844        205 0.073007 0.078261
+iou_ranked         1.0         1844       2048        204 0.000000 0.072979
+
+================================================================================
+TOP WEIGHT CONTRIBUTIONS
+================================================================================
+ neuron                                                                                                                                                             formula      iou  weight_entailment  weight_neutral  weight_contradiction  total_weight dominant_class
+    962                                                   (premise:holds OR (premise:dress AND (NOT hypothesis:wearing)) OR (premise:wearing AND (NOT hypothesis:wearing))) 0.098583           0.028442        0.068848              0.103027      0.200317  contradiction
+    353        (hypothesis:walking OR (hypothesis:dog AND (NOT hypothesis:man)) OR (hypothesis:sitting AND (NOT hypothesis:man)) OR (premise:man AND (NOT hypothesis:man))) 0.071362          -0.017334        0.052490              0.083984      0.153809  contradiction
+    957                                                              ((NOT premise:holding) AND (hypothesis:person OR premise:dressed OR premise:shirt OR premise:wearing)) 0.080689          -0.004486       -0.047119             -0.082031      0.133636  contradiction
+    820                            ((NOT hypothesis:men) AND (premise:3 OR premise:man) AND (premise:3 OR (NOT hypothesis:man)) AND (premise:3 OR (NOT hypothesis:person))) 0.094779           0.057617        0.023071             -0.048096      0.128784     entailment
+   1000                                                                   ((NOT premise:group) AND (hypothesis:women OR premise:band OR premise:looking OR premise:people)) 0.073818          -0.030884       -0.061279             -0.034424      0.126587        neutral
+   1354                                                               (hypothesis:outdoors OR hypothesis:outside OR hypothesis:present OR premise:produce OR premise:score) 0.163020          -0.056641       -0.024292             -0.044922      0.125854     entailment
+    772        (hypothesis:women OR (hypothesis:people AND (NOT premise:person)) OR (hypothesis:person AND (NOT premise:person)) OR (premise:man AND (NOT premise:person))) 0.061996           0.017090        0.037354              0.071289      0.125732  contradiction
+   2040     (hypothesis:photo OR (hypothesis:human AND (NOT premise:person)) OR (hypothesis:near AND (NOT premise:person)) OR (hypothesis:person AND (NOT premise:person))) 0.106529          -0.009338        0.045898              0.069824      0.125061  contradiction
+    378       (hypothesis:animal OR (hypothesis:people AND (NOT premise:man)) OR (hypothesis:standing AND (NOT premise:man)) OR (hypothesis:walking AND (NOT premise:man))) 0.094185          -0.017944       -0.035156             -0.065918      0.119019  contradiction
+    925                                                                (hypothesis:cat OR hypothesis:eating OR hypothesis:eats OR hypothesis:sleeping OR hypothesis:sleeps) 0.124837          -0.037109       -0.031128             -0.050781      0.119019  contradiction
+    373 (hypothesis:shirt OR (hypothesis:tall AND (NOT hypothesis:playing)) OR (premise:blue AND (NOT hypothesis:playing)) OR (premise:young AND (NOT hypothesis:playing))) 0.086749          -0.011963        0.063965              0.039795      0.115723        neutral
+    427                                                                        (hypothesis:brown OR hypothesis:small OR hypothesis:walks OR premise:black OR premise:white) 0.084874           0.035400        0.046875              0.030273      0.112549        neutral
+   1565                                                            (hypothesis:asleep OR hypothesis:inside OR hypothesis:sits OR hypothesis:sitting OR hypothesis:sleeping) 0.139754           0.021851        0.049561              0.040283      0.111694        neutral
+     51                                                                                 (premise:basket OR premise:hair OR premise:head OR premise:jacket OR premise:shirt) 0.118343          -0.046387       -0.021729             -0.042236      0.110352     entailment
+    198                                                               (hypothesis:bedroom OR hypothesis:cat OR hypothesis:eating OR hypothesis:sits OR hypothesis:swimming) 0.102596           0.046875        0.009094              0.053467      0.109436  contradiction
+    513                                                           (hypothesis:camera OR hypothesis:near OR hypothesis:outdoors OR hypothesis:outside OR hypothesis:smiling) 0.148250          -0.050537        0.017822              0.040283      0.108643     entailment
+   1515                                                                          (hypothesis:eating OR hypothesis:wearing OR premise:pink OR premise:shirt OR premise:suit) 0.097160          -0.046631       -0.037354             -0.024536      0.108521     entailment
+   1629                                                             (hypothesis:human OR hypothesis:humans OR hypothesis:instrument OR hypothesis:music OR hypothesis:tall) 0.110592           0.034424       -0.054199             -0.019409      0.108032        neutral
+   1074                                                               ((NOT premise:group) AND (hypothesis:boys OR hypothesis:dogs OR hypothesis:men OR hypothesis:people)) 0.078623           0.038818        0.018799              0.050049      0.107666  contradiction
+    773                                                                 (hypothesis:indoors OR hypothesis:nap OR hypothesis:outdoors OR hypothesis:people OR premise:stack) 0.109944          -0.044678        0.034424             -0.028320      0.107422     entailment
