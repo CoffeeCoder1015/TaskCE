@@ -19,33 +19,51 @@ def raw_activation_analysis(
     captured_results,
     task_name,
     *,
-    left_key="base",
-    right_key="finetuned",
+    base_key="base",
+    finetuned_key="finetuned",
     output_dir=None,
 ):
-    left_states = captured_results[task_name][left_key].states
-    right_states = captured_results[task_name][right_key].states
-    left_states = to_cpu_float_tensor(left_states)
-    right_states = to_cpu_float_tensor(right_states)
-    validate_same_activation_shape(left_states, right_states, left_key, right_key)
+    base_states = captured_results[task_name][base_key].states
+    finetuned_states = captured_results[task_name][finetuned_key].states
+    base_states = to_cpu_float_tensor(base_states)
+    finetuned_states = to_cpu_float_tensor(finetuned_states)
+    validate_same_activation_shape(base_states, finetuned_states, base_key, finetuned_key)
 
-    pearson_left = raw_activation_correlation_matrix(left_states)
-    pearson_right = raw_activation_correlation_matrix(right_states)
-    cosine_left = raw_activation_cosine_similarity_matrix(left_states)
-    cosine_right = raw_activation_cosine_similarity_matrix(right_states)
+    neuron_count = int(base_states.shape[1])
+    activation_vectors = torch.cat((base_states, finetuned_states), dim=1)
+
+    pearson_combined = raw_activation_correlation_matrix(activation_vectors)
+    pearson_base = pearson_combined[:neuron_count, :neuron_count]
+    pearson_finetuned = pearson_combined[neuron_count:, neuron_count:]
+    pearson_base_to_finetuned = pearson_combined[:neuron_count, neuron_count:]
+    pearson_finetuned_to_base = pearson_combined[neuron_count:, :neuron_count]
+
+    cosine_combined = raw_activation_cosine_similarity_matrix(activation_vectors)
+    cosine_base = cosine_combined[:neuron_count, :neuron_count]
+    cosine_finetuned = cosine_combined[neuron_count:, neuron_count:]
+    cosine_base_to_finetuned = cosine_combined[:neuron_count, neuron_count:]
+    cosine_finetuned_to_base = cosine_combined[neuron_count:, :neuron_count]
 
     result = {
-        "left_label": left_key,
-        "right_label": right_key,
+        "base_label": base_key,
+        "finetuned_label": finetuned_key,
         "pearson": {
-            "left": pearson_left,
-            "right": pearson_right,
-            "difference": pearson_right - pearson_left,
+            "combined": pearson_combined,
+            "base": pearson_base,
+            "finetuned": pearson_finetuned,
+            "finetuned_minus_base": pearson_finetuned - pearson_base,
+            "base_to_finetuned": pearson_base_to_finetuned,
+            "finetuned_to_base": pearson_finetuned_to_base,
+            "same_neuron_base_to_finetuned": np.diag(pearson_base_to_finetuned),
         },
         "cosine": {
-            "left": cosine_left,
-            "right": cosine_right,
-            "difference": cosine_right - cosine_left,
+            "combined": cosine_combined,
+            "base": cosine_base,
+            "finetuned": cosine_finetuned,
+            "finetuned_minus_base": cosine_finetuned - cosine_base,
+            "base_to_finetuned": cosine_base_to_finetuned,
+            "finetuned_to_base": cosine_finetuned_to_base,
+            "same_neuron_base_to_finetuned": np.diag(cosine_base_to_finetuned),
         },
     }
 
@@ -333,17 +351,30 @@ def save_raw_activation_analysis(result, output_dir):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    left_label = result["left_label"].title()
-    right_label = result["right_label"].title()
+    base_label = result["base_label"].title()
+    finetuned_label = result["finetuned_label"].title()
 
     metrics = [
         ("correlation", "pearson", "Pearson correlation"),
         ("cosine_similarity", "cosine", "cosine similarity"),
     ]
     comparisons = [
-        ("base", "left", left_label, "", (-1, 1)),
-        ("finetuned", "right", right_label, "", (-1, 1)),
-        ("difference", "difference", f"{right_label} minus {left_label.lower()}", " difference", "symmetric"),
+        ("base", "base", base_label, "", (-1, 1)),
+        ("finetuned", "finetuned", finetuned_label, "", (-1, 1)),
+        (
+            "difference",
+            "finetuned_minus_base",
+            f"{finetuned_label} minus {base_label.lower()}",
+            " difference",
+            "symmetric",
+        ),
+        (
+            "cross",
+            "base_to_finetuned",
+            f"{base_label} to {finetuned_label.lower()}",
+            "",
+            (-1, 1),
+        ),
     ]
 
     paths = {}
