@@ -359,14 +359,24 @@ def save_raw_activation_analysis(result, output_dir):
         ("cosine_similarity", "cosine", "cosine similarity"),
     ]
     comparisons = [
-        ("base", "base", base_label, "", (-1, 1)),
-        ("finetuned", "finetuned", finetuned_label, "", (-1, 1)),
+        ("base", "base", base_label, "", (-1, 1), "Base neuron index", "Base neuron index"),
+        (
+            "finetuned",
+            "finetuned",
+            finetuned_label,
+            "",
+            (-1, 1),
+            "Fine-tuned neuron index",
+            "Fine-tuned neuron index",
+        ),
         (
             "difference",
             "finetuned_minus_base",
             f"{finetuned_label} minus {base_label.lower()}",
             " difference",
             "symmetric",
+            "Neuron index",
+            "Neuron index",
         ),
         (
             "cross",
@@ -374,17 +384,35 @@ def save_raw_activation_analysis(result, output_dir):
             f"{base_label} to {finetuned_label.lower()}",
             "",
             (-1, 1),
+            "Fine-tuned neuron index",
+            "Base neuron index",
         ),
     ]
 
     paths = {}
     for filename_metric, result_metric, metric_label in metrics:
         colorbar_label = metric_label[:1].upper() + metric_label[1:]
-        for suffix, result_side, title_label, colorbar_suffix, color_range in comparisons:
+        for (
+            suffix,
+            result_side,
+            title_label,
+            colorbar_suffix,
+            color_range,
+            x_label,
+            y_label,
+        ) in comparisons:
             key = f"{filename_metric}_heatmap_{suffix}"
             path = output_dir / f"raw_activation_{filename_metric}_heatmap_{suffix}.png"
             title = f"{title_label} raw activation {metric_label} heatmap"
-            plot_heatmap(result[result_metric][result_side], path, title, colorbar_label + colorbar_suffix, color_range=color_range)
+            plot_heatmap(
+                result[result_metric][result_side],
+                path,
+                title,
+                colorbar_label + colorbar_suffix,
+                color_range=color_range,
+                x_label=x_label,
+                y_label=y_label,
+            )
             paths[key] = path
 
     return paths
@@ -439,7 +467,17 @@ def plot_activation_count_histogram(counts, min_acts, output_path, title):
     plt.close()
 
 
-def plot_heatmap(matrix, output_path, title, colorbar_label, *, cmap="coolwarm", color_range=(-1, 1)):
+def plot_heatmap(
+    matrix,
+    output_path,
+    title,
+    colorbar_label,
+    *,
+    cmap="coolwarm",
+    color_range=(-1, 1),
+    x_label="Neuron index",
+    y_label="Neuron index",
+):
     plt.figure(figsize=(10, 8))
 
     if matrix.size == 0:
@@ -463,8 +501,8 @@ def plot_heatmap(matrix, output_path, title, colorbar_label, *, cmap="coolwarm",
         plt.colorbar(image, label=colorbar_label)
 
     plt.title(title)
-    plt.xlabel("Neuron index")
-    plt.ylabel("Neuron index")
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
     plt.tight_layout()
     plt.savefig(output_path, dpi=HEATMAP_DPI)
     plt.close()
