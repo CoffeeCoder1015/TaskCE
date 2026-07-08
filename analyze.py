@@ -4,7 +4,9 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from analysis import run_ablation, run_ablation_analysis
 from analysis.activation_diagnostics import (
-    save_activation_diagnostics as save_activation_diagnostics_artifacts,
+    binary_activation_analysis,
+    raw_activation_analysis,
+    run_alpha_sweep,
 )
 from analysis.ablation_inference import AblationInferenceEngine, AblationTaskConfig
 from analysis.saving import (
@@ -79,23 +81,27 @@ def post_process_activations(activation, alpha, min_acts):
     return binarized_activations, kept_bin_activations, kept_neurons
 
 
-def save_activation_diagnostics(captured_results, search_tasks, output_dir):
+def save_activation_analysis_artifacts(captured_results, search_tasks, output_dir):
     for task in search_tasks:
         name = task["name"]
         alpha = task["alpha"]
         min_acts = task["min_acts"]
-        activations_base = captured_results[name]["base"]
         activations_finetuned = captured_results[name]["finetuned"]
         task_output_dir = os.path.join(output_dir, name)
         binarized_activations = threshold(activations_finetuned.states, alpha=alpha)
 
-        save_activation_diagnostics_artifacts(
-            activations_finetuned.states,
-            activations_base.states,
-            binarized_activations,
-            min_acts,
-            task_output_dir,
+        run_alpha_sweep(
+            captured_results,
+            name,
             alpha=alpha,
+            min_acts=min_acts,
+            output_dir=task_output_dir,
+        )
+        raw_activation_analysis(captured_results, name, output_dir=task_output_dir)
+        binary_activation_analysis(
+            binarized_activations,
+            min_acts=min_acts,
+            output_dir=task_output_dir,
         )
 
 
@@ -180,7 +186,7 @@ if __name__ == "__main__":
         lora_token=lora_token,
     )
     save_captured_activations(captured_results, output_dir)
-    save_activation_diagnostics(captured_results, search_tasks, output_dir)
+    save_activation_analysis_artifacts(captured_results, search_tasks, output_dir)
 
     for task in search_tasks:
         name = task["name"]
