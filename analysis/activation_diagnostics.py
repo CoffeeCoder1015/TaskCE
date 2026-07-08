@@ -109,14 +109,69 @@ def run_alpha_sweep(
     alpha_candidates=None,
     output_dir=None,
 ):
-    raw_states = captured_results[task_name][model_key].states
-    result = calculate_alpha_sweep(
-        raw_states,
-        alpha=alpha,
-        min_acts=min_acts,
-        alpha_candidates=alpha_candidates,
+    raw_states = to_cpu_float_tensor(captured_results[task_name][model_key].states)
+    num_examples = int(raw_states.shape[0])
+    num_neurons = int(raw_states.shape[1])
+    if alpha_candidates is None:
+        candidate_values = [alpha]
+        if num_examples > 0:
+            min_acts_alpha = min_acts / num_examples
+            candidate_values.extend(
+                min_acts_alpha * multiplier
+                for multiplier in (0.5, 0.75, 1.0, 1.25, 1.5, 2.0)
+            )
+        candidate_values.extend(float(alpha) + offset for offset in (-0.05, -0.025, 0.025, 0.05))
+    else:
+        candidate_values = alpha_candidates
+
+    candidates = sorted(
+        {
+            round(float(candidate), 6)
+            for candidate in candidate_values
+            if 0.0 < float(candidate) < 1.0
+        }
     )
-    result["model_key"] = model_key
+
+    records = []
+    for candidate_alpha in candidates:
+        if raw_states.shape[0] == 0 or raw_states.shape[1] == 0:
+            counts = torch.zeros(raw_states.shape[1], dtype=torch.float32)
+        else:
+            thresholds = torch.quantile(raw_states, 1 - float(candidate_alpha), dim=0)
+            binary_acts = raw_states > thresholds
+            counts = activation_counts(binary_acts)
+
+        counts = counts.to(torch.float32)
+        total_neurons = counts.numel()
+        zero_count = int((counts == 0).sum().item())
+        below_count = int((counts < min_acts).sum().item())
+        kept_count = int((counts >= min_acts).sum().item())
+        expected_activation_count = float(candidate_alpha * num_examples)
+        records.append(
+            {
+                "alpha": float(candidate_alpha),
+                "min_acts": int(min_acts),
+                "expected_activation_count": expected_activation_count,
+                "expected_minus_min_acts": expected_activation_count - int(min_acts),
+                "zero_activation_count": zero_count,
+                "zero_activation_percent": percent(zero_count, total_neurons),
+                "below_min_acts_count": below_count,
+                "below_min_acts_percent": percent(below_count, total_neurons),
+                "kept_count": kept_count,
+                "kept_percent": percent(kept_count, total_neurons),
+                "activation_count_percentiles": activation_count_percentiles(counts),
+            }
+        )
+
+    result = {
+        "task_name": task_name,
+        "alpha": float(alpha),
+        "min_acts": int(min_acts),
+        "model_key": model_key,
+        "num_examples": num_examples,
+        "num_neurons": num_neurons,
+        "records": records,
+    }
 
     if output_dir is not None:
         result["paths"] = save_alpha_sweep_results(result, output_dir)
@@ -124,52 +179,11 @@ def run_alpha_sweep(
     return result
 
 
-def calculate_alpha_sweep(raw_states, *, alpha, min_acts, alpha_candidates=None):
-    raw_states = to_cpu_float_tensor(raw_states)
-    candidates = tuple(
-        alpha_candidates
-        if alpha_candidates is not None
-        else local_alpha_candidates(alpha)
-    )
-    records = []
-    for candidate_alpha in candidates:
-        if raw_states.shape[0] == 0 or raw_states.shape[1] == 0:
-            counts = torch.zeros(raw_states.shape[1], dtype=torch.float32)
-        else:
-            thresholds = per_neuron_thresholds(raw_states, candidate_alpha)
-            binary_acts = raw_states > thresholds
-            counts = activation_counts(binary_acts)
-
-        record = count_summary(counts, min_acts)
-        record["alpha"] = float(candidate_alpha)
-        records.append(record)
-
-    return {
-        "alpha": float(alpha),
-        "min_acts": int(min_acts),
-        "records": records,
-    }
-
-
-def local_alpha_candidates(alpha):
-    candidates = []
-    for offset in (-0.10, -0.05, 0.0, 0.05, 0.10):
-        candidate = round(float(alpha) + offset, 6)
-        if 0.0 < candidate < 1.0 and candidate not in candidates:
-            candidates.append(candidate)
-    return candidates
-
-
-def per_neuron_thresholds(raw_acts, alpha):
-    return torch.quantile(raw_acts, 1 - float(alpha), dim=0)
-
-
 def binary_activation_analysis(
     binary_acts,
     *,
     min_acts,
     output_dir=None,
-    include_jaccard=True,
 ):
     counts = activation_counts(binary_acts)
     result = {
@@ -177,9 +191,6 @@ def binary_activation_analysis(
         "nonzero_counts": counts[counts > 0],
         "summary": count_summary(counts, min_acts),
     }
-
-    if include_jaccard:
-        result["jaccard"] = jaccard_similarity_matrix(binary_acts)
 
     if output_dir is not None:
         result["paths"] = save_binary_activation_analysis(result, output_dir)
@@ -238,30 +249,6 @@ def percent(count, total):
     return float(count / total * 100)
 
 
-def jaccard_similarity_matrix(binary_acts):
-    binary_acts = to_cpu_tensor(binary_acts)
-    if binary_acts.ndim != 2:
-        raise ValueError(f"expected 2D activation matrix, got shape {tuple(binary_acts.shape)}")
-    binary_acts = binary_acts.numpy()
-
-    num_examples, num_neurons = binary_acts.shape
-    if num_neurons == 0:
-        return np.empty((0, 0))
-    if num_examples == 0:
-        return np.zeros((num_neurons, num_neurons))
-
-    X = binary_acts.astype(np.float32)
-    intersection = X.T @ X
-    sums = X.sum(axis=0)
-    union = sums[:, None] + sums[None, :] - intersection
-
-    with np.errstate(divide="ignore", invalid="ignore"):
-        jaccard = np.divide(intersection, union, out=np.zeros_like(intersection), where=union != 0)
-
-    np.fill_diagonal(jaccard, 1.0)
-    return jaccard
-
-
 def to_cpu_float_tensor(value):
     value = to_cpu_tensor(value)
     if value.ndim != 2:
@@ -279,17 +266,67 @@ def save_alpha_sweep_results(result, output_dir):
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     alpha_sweep_path = output_dir / "alpha_sweep.json"
+    alpha_sweep_report_path = output_dir / "alpha_sweep.md"
     serializable_result = {
+        "task_name": result["task_name"],
         "alpha": result["alpha"],
         "min_acts": result["min_acts"],
         "model_key": result["model_key"],
+        "num_examples": result["num_examples"],
+        "num_neurons": result["num_neurons"],
         "records": result["records"],
     }
     with alpha_sweep_path.open("w", encoding="utf-8") as file:
         json.dump(serializable_result, file, indent=2)
         file.write("\n")
 
-    return {"alpha_sweep": alpha_sweep_path}
+    lines = [
+        "# Alpha Sweep",
+        "",
+        f"task: {result['task_name']}",
+        f"model: {result['model_key']}",
+        f"selected alpha: {result['alpha']:.6g}",
+        f"min_acts: {result['min_acts']}",
+        f"examples: {result['num_examples']}",
+        f"neurons: {result['num_neurons']}",
+        "",
+        "| alpha | expected acts/neuron | expected - min_acts | kept | kept % | below min | below min % | zero | zero % | p50 | p75 | p90 | p95 | p99 | max |",
+        "| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |",
+    ]
+    lines.extend(alpha_sweep_record_rows(result["records"]))
+    with alpha_sweep_report_path.open("w", encoding="utf-8") as file:
+        file.write("\n".join(lines))
+        file.write("\n")
+
+    return {
+        "alpha_sweep": alpha_sweep_path,
+        "alpha_sweep_report": alpha_sweep_report_path,
+    }
+
+
+def alpha_sweep_record_rows(records):
+    rows = []
+    for record in records:
+        percentiles = record["activation_count_percentiles"]
+        values = [
+            f"{record['alpha']:.6g}",
+            f"{record['expected_activation_count']:.2f}",
+            f"{record['expected_minus_min_acts']:.2f}",
+            str(record["kept_count"]),
+            f"{record['kept_percent']:.6f}",
+            str(record["below_min_acts_count"]),
+            f"{record['below_min_acts_percent']:.6f}",
+            str(record["zero_activation_count"]),
+            f"{record['zero_activation_percent']:.6f}",
+            f"{percentiles['p50']:.6f}",
+            f"{percentiles['p75']:.6f}",
+            f"{percentiles['p90']:.6f}",
+            f"{percentiles['p95']:.6f}",
+            f"{percentiles['p99']:.6f}",
+            f"{percentiles['max']:.6f}",
+        ]
+        rows.append("| " + " | ".join(values) + " |")
+    return rows
 
 
 def save_raw_activation_analysis(result, output_dir):
@@ -345,18 +382,6 @@ def save_binary_activation_analysis(result, output_dir):
         "hist_full": full_hist_path,
         "hist_nonzero": nonzero_hist_path,
     }
-    if "jaccard" in result:
-        jaccard_heatmap_path = output_dir / "binarized_activation_jaccard_heatmap.png"
-        plot_heatmap(
-            result["jaccard"],
-            jaccard_heatmap_path,
-            "Binarized activation Jaccard similarity heatmap",
-            "Jaccard similarity / IoU",
-            cmap="viridis",
-            color_range=(0.0, 1.0),
-        )
-        paths["jaccard_heatmap"] = jaccard_heatmap_path
-
     return paths
 
 
