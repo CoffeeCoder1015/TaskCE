@@ -11,6 +11,7 @@ dependencies = [
     "accelerate>=0.28.0",
     "torch>=2.9.0",
     "scikit-learn",
+    "umap-learn",
     "scipy",
     "pandas",
     "matplotlib",
