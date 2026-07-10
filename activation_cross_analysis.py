@@ -19,17 +19,23 @@ def calc_transport_latents(U, singular_values, Vt, rank):
     return base, finetuned
 
 
-def calc_bidirectional_top_k_connections(affinity, k):
+def calc_bidirectional_top_k_connections(affinity, k, relationship):
     affinity = np.asarray(affinity, dtype=float)
     if affinity.ndim != 2:
         raise ValueError("affinity must be 2D")
     if k <= 0:
         raise ValueError(f"k must be positive, got {k}")
+    if relationship not in {"correlation", "anticorrelation"}:
+        raise ValueError(
+            "relationship must be either 'correlation' or 'anticorrelation'"
+        )
 
-    return _top_k_connections(affinity, k), _top_k_connections(affinity.T, k)
+    return _top_k_connections(affinity, k, relationship), _top_k_connections(
+        affinity.T, k, relationship
+    )
 
 
-def _top_k_connections(affinity, k):
+def _top_k_connections(affinity, k, relationship):
     query_count, candidate_count = affinity.shape
     k_used = min(int(k), candidate_count)
     if k_used == 0:
@@ -40,10 +46,25 @@ def _top_k_connections(affinity, k):
             np.zeros(candidate_count, dtype=int),
         )
 
-    nearest = np.argsort(-affinity, axis=1, kind="stable")[:, :k_used]
-    query_indices = np.repeat(np.arange(query_count), k_used)
-    candidate_indices = nearest.reshape(-1)
-    scores = affinity[query_indices, candidate_indices]
+    query_indices = []
+    candidate_indices = []
+    scores = []
+    for query_index, row in enumerate(affinity):
+        valid_candidates = np.flatnonzero(row > 0.0)
+        if relationship == "anticorrelation":
+            valid_candidates = np.flatnonzero(row < 0.0)
+        order = np.argsort(
+            -np.abs(row[valid_candidates]),
+            kind="stable",
+        )
+        selected_candidates = valid_candidates[order[:k_used]]
+        query_indices.extend([query_index] * selected_candidates.size)
+        candidate_indices.extend(selected_candidates.tolist())
+        scores.extend(row[selected_candidates].tolist())
+
+    query_indices = np.asarray(query_indices, dtype=int)
+    candidate_indices = np.asarray(candidate_indices, dtype=int)
+    scores = np.asarray(scores, dtype=float)
     candidate_degrees = np.bincount(candidate_indices, minlength=candidate_count)
     return query_indices, candidate_indices, scores, candidate_degrees
 
