@@ -19,23 +19,17 @@ def calc_transport_latents(U, singular_values, Vt, rank):
     return base, finetuned
 
 
-def calc_bidirectional_knn(base_latents, finetuned_latents, k):
-    base_latents = np.asarray(base_latents, dtype=float)
-    finetuned_latents = np.asarray(finetuned_latents, dtype=float)
-    if base_latents.ndim != 2 or finetuned_latents.ndim != 2:
-        raise ValueError("base_latents and finetuned_latents must both be 2D")
-    if base_latents.shape[1] != finetuned_latents.shape[1]:
-        raise ValueError(
-            "base_latents and finetuned_latents must have the same latent dimension"
-        )
+def calc_bidirectional_top_k_connections(affinity, k):
+    affinity = np.asarray(affinity, dtype=float)
+    if affinity.ndim != 2:
+        raise ValueError("affinity must be 2D")
     if k <= 0:
         raise ValueError(f"k must be positive, got {k}")
 
-    affinity = base_latents @ finetuned_latents.T
-    return _top_k_edges(affinity, k), _top_k_edges(affinity.T, k)
+    return _top_k_connections(affinity, k), _top_k_connections(affinity.T, k)
 
 
-def _top_k_edges(affinity, k):
+def _top_k_connections(affinity, k):
     query_count, candidate_count = affinity.shape
     k_used = min(int(k), candidate_count)
     if k_used == 0:
