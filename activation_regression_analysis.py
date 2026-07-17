@@ -11,6 +11,9 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 
+TOP_PERCENT = 1.0
+
+
 parser = argparse.ArgumentParser(
     description="Calculate matrix-level activation regressions for one layer."
 )
@@ -18,12 +21,6 @@ parser.add_argument(
     "--layer",
     default="14th",
     help="Capture results directory or captured_results.pt file. Defaults to 14th.",
-)
-parser.add_argument(
-    "--top-percent",
-    required=True,
-    type=float,
-    help="Global percentage of finite R^2 cells to retain in the filtered heatmap.",
 )
 
 
@@ -196,7 +193,7 @@ if __name__ == "__main__":
 
         cutoff = np.nanpercentile(
             result["r_squared"],
-            100.0 - args.top_percent,
+            100.0 - TOP_PERCENT,
         )
         top_r_squared = np.where(
             result["r_squared"] >= cutoff,
@@ -205,7 +202,7 @@ if __name__ == "__main__":
         )
         plot_heatmap(
             top_r_squared,
-            f"{task_name} top {args.top_percent:g}% pairwise R^2",
+            f"{task_name} top {TOP_PERCENT:g}% pairwise R^2",
             "Fine-tuned neuron index",
             "Base neuron index",
             "R^2",
