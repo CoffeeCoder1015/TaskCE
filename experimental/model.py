@@ -99,6 +99,51 @@ class WrappedModel:
         self.hooked_layers.add(resolved_path)
         return resolved_path
 
+    def print_hook_report(self) -> None:
+        """Print the model hierarchy and the exact paths of active hooks."""
+        tree: dict[str, Any] = {}
+        for path, _module in self.model.named_modules():
+            if not path:
+                continue
+            branch = tree
+            for component in path.split("."):
+                branch = branch.setdefault(component, {})
+
+        lines = []
+        roots = list(tree.items())
+        stack = []
+        for index in range(len(roots) - 1, -1, -1):
+            name, children = roots[index]
+            stack.append((name, children, "", name, index == len(roots) - 1))
+
+        while stack:
+            name, children, prefix, path, is_last = stack.pop()
+            connector = "└── " if is_last else "├── "
+            if path in self.hooked_layers:
+                name = f"\033[32m{name}\033[0m"
+            lines.append(f"{prefix}{connector}{name}")
+
+            child_prefix = prefix + ("    " if is_last else "│   ")
+            child_items = list(children.items())
+            for index in range(len(child_items) - 1, -1, -1):
+                child_name, grandchildren = child_items[index]
+                stack.append(
+                    (
+                        child_name,
+                        grandchildren,
+                        child_prefix,
+                        f"{path}.{child_name}",
+                        index == len(child_items) - 1,
+                    )
+                )
+
+        print("Model architecture:")
+        print("\n".join(lines))
+        print("-" * 40)
+        print("Hooking:")
+        for layer in self.hook_handles:
+            print(layer)
+
     def save(self, identity: CaptureIdentity) -> dict[str, Path]:
         """Save each layer's capture without interpreting its structure."""
         saved_paths = {}

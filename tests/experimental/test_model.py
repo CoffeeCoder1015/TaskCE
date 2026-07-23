@@ -40,6 +40,32 @@ class PeftShapedModel(torch.nn.Module):
         return self.base_model.model.model.layers[0].feed_forward(values)
 
 
+class ArchitectureBlock(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.attention = torch.nn.Identity()
+        self.ffn = torch.nn.Identity()
+
+    def forward(self, values):
+        return self.ffn(self.attention(values))
+
+
+class ArchitectureModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.model = torch.nn.Module()
+        self.model.embedding = torch.nn.Identity()
+        self.model.layers = torch.nn.ModuleList(
+            [ArchitectureBlock(), ArchitectureBlock()]
+        )
+
+    def forward(self, values):
+        values = self.model.embedding(values)
+        for layer in self.model.layers:
+            values = layer(values)
+        return values
+
+
 def append_output(current, _module, _inputs, output):
     if current is None:
         current = []
@@ -188,6 +214,29 @@ def test_hooked_layers_keep_isolated_capture_values():
     wrapped.model(torch.tensor([[2.0]]))
 
     assert wrapped.captures == {"first": 2, "second": 2}
+
+
+def test_print_hook_report_shows_nested_model_and_plain_hook_list(capsys):
+    wrapped = WrappedModel(ArchitectureModel())
+    wrapped.hook("model.layers.1.ffn", append_output)
+
+    wrapped.print_hook_report()
+
+    assert capsys.readouterr().out == (
+        "Model architecture:\n"
+        "└── model\n"
+        "    ├── embedding\n"
+        "    └── layers\n"
+        "        ├── 0\n"
+        "        │   ├── attention\n"
+        "        │   └── ffn\n"
+        "        └── 1\n"
+        "            ├── attention\n"
+        "            └── \033[32mffn\033[0m\n"
+        "----------------------------------------\n"
+        "Hooking:\n"
+        "model.layers.1.ffn\n"
+    )
 
 
 def test_hook_can_group_captures_using_external_pipeline_state():

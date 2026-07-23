@@ -49,6 +49,7 @@ def generate_final_token_activations(
             model.hook(layer, append_final_token)
             for layer in layers
         ]
+        model.print_hook_report()
 
         input_ids = data["input_ids"]
         for start in range(0, len(input_ids), batch_size):
