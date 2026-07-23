@@ -56,22 +56,21 @@ class WrappedModel:
         if not isinstance(layer, str) or not layer:
             raise TypeError("A layer must be identified by a non-empty string path.")
 
-        try:
-            return layer, self.model.get_submodule(layer)
-        except AttributeError:
-            pass
+        modules = dict(self.model.named_modules())
+        if layer in modules:
+            return layer, modules[layer]
 
         suffix_matches = [
-            path
-            for path, _module in self.model.named_modules()
-            if path and path.endswith(f".{layer}")
+            (path, module)
+            for path, module in modules.items()
+            if path.endswith(f".{layer}")
         ]
         if len(suffix_matches) == 1:
-            resolved_path = suffix_matches[0]
-            return resolved_path, self.model.get_submodule(resolved_path)
+            return suffix_matches[0]
         if suffix_matches:
             raise KeyError(
-                f"Layer {layer!r} matched multiple module paths: {suffix_matches}"
+                f"Layer {layer!r} matched multiple module paths: "
+                f"{[path for path, _module in suffix_matches]}"
             )
         raise KeyError(layer)
 
