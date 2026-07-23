@@ -8,6 +8,55 @@ from pathlib import Path
 import numpy as np
 
 
+ACTIVATION_DATA_DIRECTORY = Path(__file__).resolve().parents[2] / "data"
+
+
+def activation_path(
+    model_id: str,
+    dataset_name: str,
+    layer: str,
+    *,
+    task_name: str | None = None,
+    checkpoint_name: str | None = None,
+) -> Path:
+    """Return one generated activation file."""
+    model_directory = ACTIVATION_DATA_DIRECTORY.joinpath(*model_id.split("/"))
+
+    if task_name is None:
+        # Select the base capture directory.
+        capture_directory = model_directory / "base"
+    elif checkpoint_name is not None:
+        # Select the requested task checkpoint directory.
+        capture_directory = model_directory / task_name / checkpoint_name
+    else:
+        # Select the numerically latest task checkpoint directory.
+        task_directory = model_directory / task_name
+        checkpoint_directories = []
+
+        for checkpoint_directory in task_directory.iterdir():
+            if checkpoint_directory.is_dir():
+                checkpoint_directories.append(checkpoint_directory)
+
+        capture_directory = max(
+            checkpoint_directories,
+            key=lambda checkpoint: int(
+                checkpoint.name.removeprefix("checkpoint-")
+            ),
+        )
+
+    activation_name = f"{dataset_name}_activation.pt"
+
+    exact_layer_directory = capture_directory / layer
+    if exact_layer_directory.is_dir():
+        return exact_layer_directory / activation_name
+
+    for saved_layer_directory in capture_directory.iterdir():
+        if saved_layer_directory.name.endswith(f".{layer}"):
+            return saved_layer_directory / activation_name
+
+    raise KeyError(layer)
+
+
 def load_activation(path):
     import torch
 
