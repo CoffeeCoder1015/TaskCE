@@ -2,7 +2,7 @@ import os
 
 import pandas as pd
 
-from ablation_plotter import plot_ablation_results
+from theoretical.ablation.analysis import plot_ablation_results
 
 
 def write_ablation_csv(path, accuracies):

@@ -114,7 +114,7 @@ def test_ablation_inference_uses_final_token_class_logits(monkeypatch):
         types.SimpleNamespace(AutoModelForCausalLM=FakeModel, AutoTokenizer=FakeTokenizer),
     )
 
-    ablation_inference = importlib.import_module("analysis.ablation_inference")
+    ablation_inference = importlib.import_module("theoretical.ablation.inference")
     ablation_inference = importlib.reload(ablation_inference)
 
     task = types.SimpleNamespace(
@@ -157,7 +157,7 @@ def test_ablation_inference_resolves_peft_prefixed_layer(monkeypatch):
     original_module_names = FakeModel.module_names
     FakeModel.module_names = ("base_model.model.model.layers.8.feed_forward",)
     try:
-        ablation_inference = importlib.import_module("analysis.ablation_inference")
+        ablation_inference = importlib.import_module("theoretical.ablation.inference")
         ablation_inference = importlib.reload(ablation_inference)
 
         task = types.SimpleNamespace(

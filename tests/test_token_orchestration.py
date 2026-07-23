@@ -1,7 +1,11 @@
 from pathlib import Path
 
+import pytest
 from datasets import Dataset
-from transformers import PreTrainedTokenizerFast
+
+PreTrainedTokenizerFast = pytest.importorskip(
+    "transformers"
+).PreTrainedTokenizerFast
 from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import WhitespaceSplit
@@ -27,9 +31,10 @@ def load_orchestration_module(monkeypatch):
 
     repo_root = Path(__file__).resolve().parents[1]
     monkeypatch.syspath_prepend(str(repo_root))
-    sys.modules.pop("WordTokenizer", None)
-    sys.modules.pop("WordTokenizer.orchestration", None)
-    return importlib.import_module("WordTokenizer.orchestration")
+    package = "theoretical.compositional_explanations.tokenizer"
+    sys.modules.pop(package, None)
+    sys.modules.pop(f"{package}.orchestration", None)
+    return importlib.import_module(f"{package}.orchestration")
 
 
 def test_get_tokenizer_loads_existing_tokenizer(tmp_path, monkeypatch):

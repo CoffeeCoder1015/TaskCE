@@ -2,8 +2,8 @@ from collections import Counter
 
 import pandas as pd
 
-from analysis.ablation import run_ablation
-from analysis.ablation_analysis import run_ablation_analysis
+from theoretical.ablation.analysis import run_ablation
+from theoretical.ablation.selection import run_ablation_analysis
 
 
 def write_search_csv(path):

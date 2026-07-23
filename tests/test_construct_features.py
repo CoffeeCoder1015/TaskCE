@@ -1,8 +1,11 @@
 from datasets import Dataset
 import numpy as np
+import pytest
 
-from feature.construct import ConstructFeatures
-from feature.find import select_feature_token_ids
+pytest.importorskip("spacy")
+
+from theoretical.compositional_explanations.feature.construct import ConstructFeatures
+from theoretical.compositional_explanations.feature.find import select_feature_token_ids
 
 
 class TinyTokenizer:

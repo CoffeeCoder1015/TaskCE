@@ -1,7 +1,7 @@
 import pandas as pd
 import pytest
 
-from analysis.ablation_analysis import (
+from theoretical.ablation.selection import (
     SEARCH_RESULT_COLUMNS,
     run_ablation_analysis,
 )
@@ -56,6 +56,8 @@ def test_run_ablation_analysis_writes_reports_and_ranked_groups(tmp_path):
     assert result.bad_neurons["neuron"].tolist() == [12, 11]
     assert result.iou_ranked_neurons["neuron"].tolist() == [10, 13, 12, 11]
     assert (tmp_path / "ablation_analysis_report.txt").exists()
+    assert set(result.result_paths) == {"good", "bad", "iou_ranked"}
+    assert all(path.exists() for path in result.result_paths.values())
     assert not (tmp_path / "ablation_group_summary.csv").exists()
     assert not (tmp_path / "ablation_iou_bands.csv").exists()
     assert not (tmp_path / "weight_contributions.csv").exists()
@@ -64,7 +66,8 @@ def test_run_ablation_analysis_writes_reports_and_ranked_groups(tmp_path):
     assert "ABLATION PRE-RUN ANALYSIS" in report
     assert "GROUP SUMMARY" in report
     assert "IOU BAND BOUNDARIES" in report
-    assert "entailment" in report
+    assert "dominant_class" in report
+    assert "ent" in report
     assert "10.0" in report
     weight_report = report.split("TOP WEIGHT CONTRIBUTIONS", 1)[1]
     assert weight_report.find("tok:C") < weight_report.find("tok:B")
@@ -81,9 +84,6 @@ def test_run_ablation_analysis_requires_expected_columns(tmp_path):
         "neuron",
         "formula",
         "iou",
-        "weight_ent",
-        "weight_neut",
-        "weight_contr",
     ]
 
 

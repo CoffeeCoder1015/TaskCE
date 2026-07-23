@@ -1,7 +1,15 @@
 from sympy import Symbol
-import torch
+import pytest
 
-from feature.search import LevelSearch, Search, SearchResult, searchConfig, search_all
+torch = pytest.importorskip("torch")
+
+from theoretical.compositional_explanations.feature.search import (
+    LevelSearch,
+    Search,
+    SearchResult,
+    search_all,
+    searchConfig,
+)
 
 
 def exact_match_inputs():

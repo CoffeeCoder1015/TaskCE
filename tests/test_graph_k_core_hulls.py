@@ -7,7 +7,9 @@ import pandas as pd
 
 
 def load_graph_module():
-    module_path = Path(__file__).parents[1] / "analysis" / "graph.py"
+    module_path = (
+        Path(__file__).parents[1] / "theoretical" / "graph_analysis" / "analysis.py"
+    )
     spec = importlib.util.spec_from_file_location("analysis_graph", module_path)
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)

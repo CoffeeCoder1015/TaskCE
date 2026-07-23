@@ -2,7 +2,10 @@ from types import SimpleNamespace
 
 import pandas as pd
 
-from analysis import build_neuron_search_results_dataframe, save_neuron_search_results_csv
+from theoretical.compositional_explanations.saving import (
+    build_neuron_search_results_dataframe,
+    save_neuron_search_results_csv,
+)
 
 
 def test_build_neuron_search_results_dataframe_includes_found_and_pruned_neurons():
