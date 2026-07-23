@@ -4,7 +4,7 @@ import torch
 from peft import PeftModel
 from transformers import AutoModelForCausalLM
 
-from capture.lora_checkpoints import latest_task_lora_checkpoint
+from experimental.lora_checkpoints import latest_task_lora_checkpoint
 
 
 model_id = "LiquidAI/LFM2.5-1.2B-Thinking"
