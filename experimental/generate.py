@@ -6,13 +6,11 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
+from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from experimental.generators.activations import generate_final_token_activations
-from experimental.lora_checkpoints import (
-    latest_task_lora_checkpoints,
-    load_lora,
-)
+from experimental.lora_checkpoints import latest_task_lora_checkpoints
 from experimental.model import CaptureIdentity, WrappedModel
 
 
@@ -118,7 +116,7 @@ for dataset_name, dataset in (
         )
 
         if checkpoint is not None:
-            model = load_lora(model, checkpoint)
+            model = PeftModel.from_pretrained(model, checkpoint)
 
         model.eval()
         wrapped = WrappedModel(model)
