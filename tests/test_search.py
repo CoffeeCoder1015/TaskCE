@@ -6,9 +6,9 @@ torch = pytest.importorskip("torch")
 from theoretical.compositional_explanations.search.algorithm import (
     LevelSearch,
     Search,
+    SearchConfig,
     SearchResult,
     search_all,
-    searchConfig,
 )
 
 
@@ -26,7 +26,11 @@ def exact_match_inputs():
 def test_search_returns_best_formula_and_score_for_exact_match():
     neuron, feature_vectors = exact_match_inputs()
 
-    best_formula, best_score = Search(neuron, feature_vectors, config=searchConfig())
+    best_formula, best_score = Search(
+        neuron,
+        feature_vectors,
+        config=SearchConfig(),
+    )
 
     assert best_formula == "tok:A"
     assert best_score == 1.0
@@ -35,7 +39,11 @@ def test_search_returns_best_formula_and_score_for_exact_match():
 def test_level_search_returns_best_formula_and_score_for_exact_match():
     neuron, feature_vectors = exact_match_inputs()
 
-    best_formula, best_score = LevelSearch(neuron, feature_vectors, config=searchConfig())
+    best_formula, best_score = LevelSearch(
+        neuron,
+        feature_vectors,
+        config=SearchConfig(),
+    )
 
     assert best_formula == "tok:A"
     assert best_score == 1.0
@@ -79,7 +87,7 @@ def test_search_all_parallel_matches_serial_results():
             [False, False, False],
         ]
     )
-    config = searchConfig(pruned_queue_size=2, formula_length=3)
+    config = SearchConfig(beam_size=2, maximum_formula_length=3)
 
     serial_results = search_all(
         activation_vectors,

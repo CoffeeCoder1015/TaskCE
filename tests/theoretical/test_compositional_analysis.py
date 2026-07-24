@@ -62,7 +62,14 @@ def test_analysis_writes_to_its_owned_data_path_by_default(tmp_path, monkeypatch
         "construct_feature_vectors",
         lambda *_args, **_kwargs: [],
     )
-    monkeypatch.setattr(analysis_module, "search_all", lambda *_args, **_kwargs: [])
+    search_call = {}
+
+    def fake_search_all(*args, **kwargs):
+        search_call["args"] = args
+        search_call["kwargs"] = kwargs
+        return []
+
+    monkeypatch.setattr(analysis_module, "search_all", fake_search_all)
     monkeypatch.setattr(
         analysis_module,
         "load_classification_weights",
@@ -82,6 +89,8 @@ def test_analysis_writes_to_its_owned_data_path_by_default(tmp_path, monkeypatch
     )
 
     assert output_path == tmp_path / "snli_beam_results.csv"
+    assert len(search_call["args"]) == 2
+    assert search_call["kwargs"] == {"num_workers": 1}
     dataframe = pd.read_csv(output_path)
     assert dataframe["neuron"].tolist() == [0, 1, 2]
     assert set(dataframe["formula"]) == {"LOW_ACTS_PRUNED"}

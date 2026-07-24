@@ -95,14 +95,14 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
     return new_compositions
 
 @dataclass
-class searchConfig:
-    formula_length: int = 5
-    pruned_queue_size: int = 10 # The beam size
+class SearchConfig:
+    maximum_formula_length: int = 5
+    beam_size: int = 10
     max_iterations: int = 10
     length_penalty: float = 0.0
     iou_calculation_batch_size: int = 16384
 
-def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
+def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=SearchConfig()):
     print("Neuron shape:",neuron.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
 
@@ -114,7 +114,7 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
     nonzero_features.sort(key=lambda x: x[0], reverse=True)
     print("Pre/Post zero filtering:", len(states), len(nonzero_features))
 
-    beam_size = config.pruned_queue_size
+    beam_size = config.beam_size
     queue = []
     # Load queue
     queue_id = 0
@@ -147,7 +147,7 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
                 best_iou = current_iou
 
             length = formula.count(Symbol)
-            if length >= config.formula_length:
+            if length >= config.maximum_formula_length:
                 continue # Do not expand formula at max length
 
             for _, neighbor_state in nonzero_features:
@@ -175,7 +175,7 @@ def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch
 
     return best_formula, best_score
 
-def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
+def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=SearchConfig()):
     print("Neuron shape:",neuron_activation.shape)
     print("Feature shape:",feature_vectors[0][1].shape)
 
@@ -187,7 +187,7 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
     nonzero_features.sort(key=lambda x: x[0], reverse=True)
     print("Pre/Post zero filtering:", len(states), len(nonzero_features))
 
-    beam_size = config.pruned_queue_size
+    beam_size = config.beam_size
     queue = []
     # Load queue
     queue_id = 0
@@ -220,7 +220,7 @@ def Search(neuron_activation: torch.Tensor,feature_vectors:list[tuple[sympy.Expr
             best_iou = current_iou
 
         length = formula.count(Symbol)
-        if length >= config.formula_length:
+        if length >= config.maximum_formula_length:
             continue # Do not expand formula at max length
 
         neighbors = []
@@ -272,13 +272,13 @@ def activation_index_chunks(total_activations, num_workers):
         start = stop
     return chunks
 
-def search_worker(activation_vectors,activation_indicies:list[int],feature_vectors,device=None,config=searchConfig()):
+def search_worker(activation_vectors,activation_indices:list[int],feature_vectors,device=None,config=SearchConfig()):
     device = resolve_device(device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     activation_vectors = to_binary_tensor(activation_vectors, device)
     results = []
     
-    for local_activation_index, global_activation_index in enumerate(activation_indicies):
+    for local_activation_index, global_activation_index in enumerate(activation_indices):
         search_func = LevelSearch
         print(f"Running {search_func.__name__} for global index {global_activation_index}")
         neuron_activation = activation_vectors[:,local_activation_index].contiguous()
@@ -301,7 +301,14 @@ def search_worker(activation_vectors,activation_indicies:list[int],feature_vecto
 def search_worker_from_args(args):
     return search_worker(*args)
 
-def search_all(activation_vectors, feature_vectors, num_workers=1, device=None, config=searchConfig()):
+def search_all(
+    activation_vectors,
+    feature_vectors,
+    num_workers=1,
+    device=None,
+    config=None,
+):
+    config = config or SearchConfig()
     if num_workers <= 1:
         return search_worker(
             activation_vectors,

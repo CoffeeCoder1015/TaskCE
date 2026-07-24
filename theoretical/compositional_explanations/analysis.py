@@ -24,7 +24,6 @@ from postprocessing import (
     threshold,
 )
 from search.algorithm import (
-    searchConfig,
     search_all,
 )
 
@@ -234,7 +233,6 @@ def run(
     lora_repository: str = DEFAULT_LORA_REPOSITORY,
     lora_token: str | bool | None = None,
     num_workers: int = 1,
-    config: searchConfig | None = None,
 ) -> Path:
     """Build and save compositional explanations for one configured task."""
     task = TASKS[task_name]
@@ -263,19 +261,11 @@ def run(
         binary_activations,
         min_acts=task.min_acts,
     )
-    if config is None:
-        search_results = search_all(
-            searchable_activations.matrix,
-            features,
-            num_workers=num_workers,
-        )
-    else:
-        search_results = search_all(
-            searchable_activations.matrix,
-            features,
-            num_workers=num_workers,
-            config=config,
-        )
+    search_results = search_all(
+        searchable_activations.matrix,
+        features,
+        num_workers=num_workers,
+    )
 
     classification_weights = load_classification_weights(
         task,
