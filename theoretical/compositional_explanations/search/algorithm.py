@@ -7,7 +7,7 @@ from sympy import Symbol, simplify_logic
 
 import sympy
 import torch
-from theoretical.compositional_explanations.feature.formula import logic_str
+from .formula import logic_str
 from sympy.logic import And, Or, Not
 
 @dataclass
@@ -96,10 +96,10 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
 
 @dataclass
 class searchConfig:
-    formula_length: int = 6
-    pruned_queue_size: int = 30 # The beam size
-    max_iterations: int = 50
-    length_penalty: float = 0.01
+    formula_length: int = 5
+    pruned_queue_size: int = 10 # The beam size
+    max_iterations: int = 10
+    length_penalty: float = 0.0
     iou_calculation_batch_size: int = 16384
 
 def LevelSearch(neuron: torch.Tensor,feature_vectors:list[tuple[sympy.Expr,torch.Tensor]],config=searchConfig()):
@@ -279,7 +279,7 @@ def search_worker(activation_vectors,activation_indicies:list[int],feature_vecto
     results = []
     
     for local_activation_index, global_activation_index in enumerate(activation_indicies):
-        search_func = Search
+        search_func = LevelSearch
         print(f"Running {search_func.__name__} for global index {global_activation_index}")
         neuron_activation = activation_vectors[:,local_activation_index].contiguous()
         best_formula, best_score = search_func(

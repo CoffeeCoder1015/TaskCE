@@ -1,4 +1,4 @@
-"""Compositional explanation loading, processing, and saving."""
+"""Run the compositional explanation analysis."""
 
 import gc
 import os
@@ -6,30 +6,26 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+import pandas as pd
 import torch
 from datasets import load_dataset
 from huggingface_hub import snapshot_download
 from peft import PeftModel
 from transformers import AutoModelForCausalLM
 
-from theoretical.compositional_explanations.feature.construct import (
-    ConstructFeatures,
-    identity_column_selector,
+from .construction.tokenizer.orchestration import (
+    get_tokenizer,
 )
-from theoretical.compositional_explanations.feature.search import (
-    searchConfig,
-    search_all,
+from .construction.vectors import (
+    construct_feature_vectors,
 )
-from theoretical.compositional_explanations.postprocessing import (
+from .postprocessing import (
     prune_min_acts,
     threshold,
 )
-from theoretical.compositional_explanations.saving import (
-    build_neuron_search_results_dataframe,
-    save_neuron_search_results_csv,
-)
-from theoretical.compositional_explanations.tokenizer.orchestration import (
-    get_tokenizer,
+from .search.algorithm import (
+    searchConfig,
+    search_all,
 )
 
 
@@ -97,6 +93,7 @@ class CompositionalTask:
     split: str
     feature_columns: tuple[str, ...]
     tokenizer_name: str
+    tokenizer_uses_pos: bool
     alpha: float
     min_acts: int
     class_token_ids: dict[str, int]
@@ -116,6 +113,7 @@ TASKS = {
         split="validation",
         feature_columns=("premise", "hypothesis"),
         tokenizer_name="spacy-pos-snli-features",
+        tokenizer_uses_pos=False,
         alpha=0.055,
         min_acts=500,
         class_token_ids={
@@ -130,6 +128,7 @@ TASKS = {
         split="validation[:10_000]",
         feature_columns=("claim", "evidence"),
         tokenizer_name="spacy-pos-claim-features",
+        tokenizer_uses_pos=False,
         alpha=0.052,
         min_acts=500,
         class_token_ids={
@@ -156,13 +155,6 @@ def load_activation(path: str | Path) -> torch.Tensor:
             f"got {tuple(activation.shape)}."
         )
     return activation.detach().cpu().to(torch.float32)
-
-
-def select_tokenizer_training_text(columns: tuple[str, ...]):
-    def selector(example):
-        return {"text": "\n".join(str(example[column]) for column in columns)}
-
-    return selector
 
 
 def classification_weights_from_model(model, class_token_ids):
@@ -241,7 +233,7 @@ def run(
     model_id: str = DEFAULT_MODEL_ID,
     lora_repository: str = DEFAULT_LORA_REPOSITORY,
     lora_token: str | bool | None = None,
-    num_workers: int = 8,
+    num_workers: int = 1,
     config: searchConfig | None = None,
 ) -> Path:
     """Build and save compositional explanations for one configured task."""
@@ -254,28 +246,25 @@ def run(
             f"{len(dataset)} != {activations.shape[0]}."
         )
 
-    tokenizer_training_data = dataset.map(
-        select_tokenizer_training_text(task.feature_columns)
-    )
     feature_tokenizer = get_tokenizer(
         task.tokenizer_name,
-        tokenizer_training_data,
+        dataset,
+        task.feature_columns,
+        enable_pos=task.tokenizer_uses_pos,
     )
-    features = ConstructFeatures(
+    features = construct_feature_vectors(
         dataset,
         feature_tokenizer,
-        feature_text_selector=identity_column_selector(
-            list(task.feature_columns)
-        ),
+        task.feature_columns,
     )
 
     binary_activations = threshold(activations, alpha=task.alpha)
-    kept_activations, kept_neurons = prune_min_acts(
+    searchable_activations = prune_min_acts(
         binary_activations,
         min_acts=task.min_acts,
     )
     search_results = search_all(
-        kept_activations,
+        searchable_activations.matrix,
         features,
         num_workers=num_workers,
         config=config or searchConfig(
@@ -302,17 +291,33 @@ def run(
             f"{classification_weights.shape[0]} != {activations.shape[1]}."
         )
 
-    dataframe = build_neuron_search_results_dataframe(
-        search_results,
-        kept_neurons,
-        activations.shape[1],
-        classification_weights,
-        task.weight_column_names,
+    results = pd.DataFrame(
+        classification_weights.tolist(),
+        columns=task.weight_column_names,
     )
+    results.insert(0, "iou", 0.0)
+    results.insert(0, "formula", "LOW_ACTS_PRUNED")
+    results.insert(0, "neuron", range(len(results)))
+    results = results.set_index("neuron", drop=False)
+
+    for result in search_results:
+        neuron_id = searchable_activations.neuron_ids[
+            result.activation_index
+        ]
+        results.at[neuron_id, "formula"] = result.best_formula
+        results.at[neuron_id, "iou"] = result.best_score
+
+    results = results.sort_values(
+        "iou",
+        ascending=False,
+        kind="stable",
+    ).reset_index(drop=True)
+
     output_path = (
         Path(output_path)
         if output_path is not None
         else result_path(task_name)
     )
-    save_neuron_search_results_csv(dataframe, output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    results.to_csv(output_path, index=False)
     return output_path

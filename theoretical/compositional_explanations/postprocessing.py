@@ -1,18 +1,42 @@
-"""Threshold and prune captured activations for compositional analysis."""
+"""Prepare captured activations for compositional search."""
+
+from dataclasses import dataclass
+
 import torch
 
 
-def threshold(activation, alpha=None):
-    # shape = activation.shape  # [example count x activation size]
+@dataclass(frozen=True, eq=False)
+class SearchableActivations:
+    """A retained activation matrix paired with its original neuron IDs."""
+
+    matrix: torch.Tensor
+    neuron_ids: tuple[int, ...]
+
+
+def threshold(
+    activation: torch.Tensor,
+    alpha: float | None = None,
+) -> torch.Tensor:
+    """Convert continuous activations to binary example-by-neuron vectors."""
     if alpha is None:
-        return (activation > 0).to(torch.int8)
+        return activation > 0
 
     thresholds = torch.quantile(activation, 1 - alpha, dim=0)
-    return (activation > thresholds).to(torch.int8)
+    return activation > thresholds
 
 
-def prune_min_acts(binary_acts, min_acts=500):
-    frequency = binary_acts.sum(dim=0)
-    keep_mask = frequency >= min_acts
-    neuron_ids = torch.nonzero(keep_mask, as_tuple=False).flatten()
-    return binary_acts[:, keep_mask], neuron_ids
+def prune_min_acts(
+    binary_activations: torch.Tensor,
+    min_acts: int = 500,
+) -> SearchableActivations:
+    """Remove infrequently active neurons while retaining their identities."""
+    keep_mask = binary_activations.sum(dim=0) >= min_acts
+    neuron_ids = torch.nonzero(
+        keep_mask,
+        as_tuple=False,
+    ).flatten()
+
+    return SearchableActivations(
+        matrix=binary_activations[:, keep_mask],
+        neuron_ids=tuple(int(value) for value in neuron_ids.tolist()),
+    )

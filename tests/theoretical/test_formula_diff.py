@@ -190,13 +190,27 @@ def test_write_formula_diff_generation_keeps_pruned_cells_as_nulls(tmp_path: Pat
 
     pruned_same_row = same_rows[same_rows["neuron"] == 2].iloc[0]
     assert pd.isna(pruned_same_row["diff_score"])
-    assert pruned_same_row["base_formula"] == formula_diff.PRUNED_FORMULA
-    assert pruned_same_row["finetuned_formula"] == formula_diff.PRUNED_FORMULA
+    assert pruned_same_row["base_formula"] == formula_diff.LOW_ACTS_PRUNED
+    assert pruned_same_row["finetuned_formula"] == formula_diff.LOW_ACTS_PRUNED
     assert pd.isna(pruned_same_row["formula_diff"])
 
     assert closest_buckets["toy"][1] == {
         "neuron_id": 2,
-        "base_formula": formula_diff.PRUNED_FORMULA,
+        "base_formula": formula_diff.LOW_ACTS_PRUNED,
         "lowest_diff_score": None,
         "candidates": [],
     }
+
+
+def test_read_formula_rows_treats_low_acts_pruned_as_missing(tmp_path: Path):
+    csv_path = tmp_path / "results.csv"
+    csv_path.write_text(
+        "neuron,formula,iou\n1,LOW_ACTS_PRUNED,0.0\n",
+        encoding="utf-8",
+    )
+
+    [row] = formula_diff.read_formula_rows(csv_path)
+
+    assert row.formula == "LOW_ACTS_PRUNED"
+    assert row.formula_node is None
+    assert row.canonical_formula == "LOW_ACTS_PRUNED"

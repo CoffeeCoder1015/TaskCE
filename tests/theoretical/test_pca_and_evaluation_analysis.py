@@ -5,7 +5,7 @@ torch = pytest.importorskip("torch")
 pytest.importorskip("datasets")
 pytest.importorskip("transformers")
 
-import theoretical.activation_diagnostics.pca as pca
+import theoretical.activations.task_separation.analysis as task_separation
 import theoretical.evaluation.analysis as evaluation_analysis
 
 
@@ -20,17 +20,20 @@ class FakeDataset:
         return self.values
 
 
-def test_pca_analysis_reloads_labels_for_raw_activation_rows(tmp_path, monkeypatch):
+def test_task_separation_reloads_labels_for_raw_activation_rows(
+    tmp_path,
+    monkeypatch,
+):
     activation_path = tmp_path / "snli.pt"
     torch.save(torch.arange(12, dtype=torch.float32).reshape(3, 4), activation_path)
     monkeypatch.setattr(
-        pca,
-        "load_dataset",
+        task_separation,
+        "_load_dataset",
         lambda *_args, **_kwargs: FakeDataset([0, 1]),
     )
 
     with pytest.raises(ValueError, match="dataset rows do not match activation rows"):
-        pca.run("snli", activation_path, output_path=tmp_path / "pca.png")
+        task_separation.run("snli", activation_path)
 
 
 def test_evaluation_analysis_persists_measurements_at_selected_path(

@@ -3,7 +3,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from theoretical.compositional_explanations.feature.search import (
+from theoretical.compositional_explanations.search.algorithm import (
     LevelSearch,
     Search,
     SearchResult,

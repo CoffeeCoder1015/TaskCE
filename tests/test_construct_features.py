@@ -4,8 +4,12 @@ import pytest
 
 pytest.importorskip("spacy")
 
-from theoretical.compositional_explanations.feature.construct import ConstructFeatures
-from theoretical.compositional_explanations.feature.find import select_feature_token_ids
+from theoretical.compositional_explanations.construction.vectors import (
+    construct_feature_vectors,
+)
+from theoretical.compositional_explanations.construction.vocabulary import (
+    select_feature_token_ids,
+)
 
 
 class TinyTokenizer:
@@ -43,10 +47,6 @@ class TinyTokenizer:
         return [self.token_to_id[token] for token in tokens]
 
 
-def select_feature_text(example):
-    return {"color": example["color"], "shape": example["shape"]}
-
-
 def test_construct_features_selects_data_for_feature_construction():
     dataset = Dataset.from_dict(
         {
@@ -56,29 +56,21 @@ def test_construct_features_selects_data_for_feature_construction():
         }
     )
 
-    feature_vectors = ConstructFeatures(
+    feature_vectors = construct_feature_vectors(
         dataset,
         TinyTokenizer(),
-        feature_text_selector=select_feature_text,
+        ("color", "shape"),
         top_k=5,
     )
 
     formulas = {str(formula) for formula, _ in feature_vectors}
 
-    assert {
+    assert formulas == {
         "color:red",
         "color:blue",
-        "color:circle",
-        "color:square",
-        "color:<NN>",
-        "color:<VB>",
-        "shape:red",
-        "shape:blue",
         "shape:circle",
         "shape:square",
-        "shape:<NN>",
-        "shape:<VB>",
-    } <= formulas
+    }
     assert all("unused:" not in formula for formula in formulas)
     assert all("ignored" not in formula for formula in formulas)
 
@@ -104,15 +96,16 @@ def test_construct_features_includes_pos_tags_after_top_k_tokens():
         }
     )
 
-    feature_vectors = ConstructFeatures(
+    feature_vectors = construct_feature_vectors(
         dataset,
         TinyTokenizer(),
-        feature_text_selector=select_feature_text,
+        ("color", "shape"),
         top_k=1,
     )
 
     formulas = {str(formula) for formula, _ in feature_vectors}
 
-    assert {"color:red", "shape:red"} <= formulas
+    assert "color:red" in formulas
+    assert "shape:red" not in formulas
     assert {"color:<NN>", "shape:<NN>", "color:<VB>", "shape:<VB>"} <= formulas
     assert "color:blue" not in formulas

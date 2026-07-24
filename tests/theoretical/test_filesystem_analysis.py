@@ -9,9 +9,8 @@ pytest.importorskip("peft")
 pytest.importorskip("transformers")
 
 import theoretical.ablation.analysis as ablation_analysis
-import theoretical.activation_diagnostics.analysis as diagnostics_analysis
-import theoretical.activation_regression.analysis as regression_analysis
-import theoretical.activation_transfer.analysis as transfer_analysis
+import theoretical.activations.neuron_fate.analysis as neuron_fate_analysis
+import theoretical.activations.threshold_coverage.analysis as threshold_coverage_analysis
 import theoretical.graph_analysis.analysis as graph_analysis
 
 
@@ -33,43 +32,22 @@ def save_pair(directory):
     return base_path, finetuned_path
 
 
-def test_diagnostics_and_regression_load_tensor_files(tmp_path):
+def test_neuron_fate_and_threshold_coverage_load_tensor_files(tmp_path):
     base_path, finetuned_path = save_pair(tmp_path)
 
-    diagnostics = diagnostics_analysis.run(
+    fate = neuron_fate_analysis.run(
         base_path,
+        finetuned_path,
+    )
+    coverage = threshold_coverage_analysis.run(
         finetuned_path,
         task_name="demo",
         alpha=0.5,
         min_acts=1,
-        output_directory=tmp_path,
-    )
-    regression = regression_analysis.run(
-        base_path,
-        finetuned_path,
-        task_name="demo",
-        output_directory=tmp_path,
     )
 
-    assert set(diagnostics) == {"raw", "alpha_sweep", "binary"}
-    assert set(regression) == {
-        "r_squared",
-        "alpha",
-        "beta",
-        "top_r_squared",
-        "ccc",
-        "cross_minus_base_ccc",
-        "identity_mse",
-    }
-
-    transfer_path = transfer_analysis.run(
-        base_path,
-        finetuned_path,
-        task_name="demo",
-        output_path=tmp_path / "demo_activation_transfer.npz",
-    )
-    assert transfer_path == tmp_path / "demo_activation_transfer.npz"
-    assert transfer_path.exists()
+    assert set(fate) == {"affine", "literal", "relative_to_base"}
+    assert set(coverage) == {"selected", "sweep"}
 
 
 def test_graph_analysis_reads_raw_tensors_and_compositional_csv(tmp_path, monkeypatch):

@@ -13,8 +13,7 @@ from sympy.logic.boolalg import And as SymAnd
 from sympy.logic.boolalg import Not as SymNot
 from sympy.logic.boolalg import Or as SymOr
 
-
-PRUNED_FORMULA = "LOW_ACTS_PRUNED"
+LOW_ACTS_PRUNED = "LOW_ACTS_PRUNED"
 COMMUTATIVE_OPERATORS = {"AND", "OR"}
 CLOSEST_BUCKETS_FILENAME = "closest_finetuned_formula_match_buckets.json"
 HEATMAP_DPI = 300
@@ -163,7 +162,7 @@ class FormulaNode:
 
     def canonical(self) -> str:
         if self.kind == "pruned":
-            return PRUNED_FORMULA
+            return LOW_ACTS_PRUNED
         if self.kind == "atom":
             return self.value or ""
         if self.kind == "not":
@@ -233,7 +232,7 @@ def node_label(node: FormulaNode) -> str:
 
 
 def parse_formula(text: str) -> FormulaNode:
-    if text == PRUNED_FORMULA:
+    if text == LOW_ACTS_PRUNED:
         return FormulaNode(kind="pruned")
 
     tokens = _tokenize_formula(text)
@@ -520,8 +519,8 @@ def read_formula_rows(path: Path) -> list[FormulaCsvRow]:
 
     for row in frame.sort_values("neuron").itertuples(index=False):
         formula = getattr(row, "formula")
-        formula_text = PRUNED_FORMULA if pd.isna(formula) else str(formula)
-        if formula_text == PRUNED_FORMULA:
+        formula_text = LOW_ACTS_PRUNED if pd.isna(formula) else str(formula)
+        if formula_text == LOW_ACTS_PRUNED:
             rows.append(
                 FormulaCsvRow(
                     neuron=int(getattr(row, "neuron")),
