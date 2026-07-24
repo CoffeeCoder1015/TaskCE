@@ -13,17 +13,17 @@ from huggingface_hub import snapshot_download
 from peft import PeftModel
 from transformers import AutoModelForCausalLM
 
-from .construction.tokenizer.orchestration import (
+from construction.tokenizer.orchestration import (
     get_tokenizer,
 )
-from .construction.vectors import (
+from construction.vectors import (
     construct_feature_vectors,
 )
-from .postprocessing import (
+from postprocessing import (
     prune_min_acts,
     threshold,
 )
-from .search.algorithm import (
+from new_search.algorithm import (
     searchConfig,
     search_all,
 )
