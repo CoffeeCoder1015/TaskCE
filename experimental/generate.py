@@ -81,7 +81,7 @@ checkpoints = latest_task_lora_checkpoints(
     token=os.environ.get("HF_TOKEN"),
 )
 
-snli = load_dataset("snli", split="validation")
+snli = load_dataset("stanfordnlp/snli", split="validation")
 snli = snli.map(format_snli)
 
 vitaminc = load_dataset(

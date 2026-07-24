@@ -61,7 +61,7 @@ class AblationStudy:
 STUDIES = {
     "snli": AblationStudy(
         name="snli",
-        dataset_name="snli",
+        dataset_name="stanfordnlp/snli",
         split="validation",
         labels=("entailment", "neutral", "contradiction"),
         class_token_ids={

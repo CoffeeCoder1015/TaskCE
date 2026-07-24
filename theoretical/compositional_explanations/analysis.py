@@ -108,7 +108,7 @@ class CompositionalTask:
 TASKS = {
     "snli": CompositionalTask(
         name="snli",
-        dataset_name="snli",
+        dataset_name="stanfordnlp/snli",
         split="validation",
         feature_columns=("premise", "hypothesis"),
         tokenizer_name="spacy-pos-snli-features",

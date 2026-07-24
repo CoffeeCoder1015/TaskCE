@@ -95,7 +95,12 @@ class TaskLabels:
 
 
 TASKS = {
-    "snli": TaskLabels("snli", "validation", "label", SNLI_LABELS),
+    "snli": TaskLabels(
+        "stanfordnlp/snli",
+        "validation",
+        "label",
+        SNLI_LABELS,
+    ),
     "claim": TaskLabels("tals/vitaminc", "validation[:10_000]", "label"),
     "fallacy": TaskLabels(
         "tasksource/logical-fallacy",

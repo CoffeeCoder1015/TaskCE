@@ -296,7 +296,7 @@ def run(
     tasks = [
         EvalConfig(
             "snli",
-            _load_dataset("snli", split="validation"),
+            _load_dataset("stanfordnlp/snli", split="validation"),
             format_snli,
             extract_snli,
         ),
