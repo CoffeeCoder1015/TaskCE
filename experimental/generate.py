@@ -126,7 +126,7 @@ for dataset_name, dataset in (
                 model=wrapped,
                 tokenizer=tokenizer,
                 data={"input_ids": dataset["input_ids"]},
-                layers=("model.layers.8.feed_forward",),
+                layers=("model.layers.8.feed_forward","model.layers.14.feed_forward"),
                 identity=capture_identity(
                     model_id=model_id,
                     dataset=dataset_name,
