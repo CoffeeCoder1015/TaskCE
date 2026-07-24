@@ -8,8 +8,7 @@ from sympy import Symbol
 from sympy.logic.boolalg import And, Not, Or
 import torch
 
-from .. import NO_EXPLANATION_FORMULA
-from .kernels import (
+from kernels import (
     atomic_iou_scores,
     composition_iou_scores,
     pack_vectors,
@@ -469,7 +468,7 @@ def build_result_one(
     if not bool(best_valid):
         return SearchResult(
             activation_index=activation_index,
-            best_formula=NO_EXPLANATION_FORMULA,
+            best_formula="LOW_ACTS_PRUNED",
             best_score=0.0,
         )
 
