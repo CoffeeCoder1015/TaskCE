@@ -8,7 +8,7 @@ from sympy import Symbol
 from sympy.logic.boolalg import And, Not, Or
 import torch
 
-from kernels import (
+from .kernels import (
     atomic_iou_scores,
     composition_iou_scores,
     pack_vectors,

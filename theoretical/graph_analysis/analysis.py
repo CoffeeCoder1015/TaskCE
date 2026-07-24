@@ -29,7 +29,7 @@ DEFAULT_PLOT_CONFIG = {
     "negative_mode": "render_only",
 }
 ACTIVATION_DATA_DIRECTORY = Path(__file__).resolve().parents[2] / "data"
-DATA_DIRECTORY = Path(__file__).resolve().parent / "data"
+DATA_DIRECTORY = Path("data")
 COMPOSITIONAL_DATA_DIRECTORY = (
     Path(__file__).resolve().parents[1]
     / "compositional_explanations"

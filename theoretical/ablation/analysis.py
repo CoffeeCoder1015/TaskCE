@@ -16,7 +16,7 @@ DEFAULT_PERCENTILES = tuple(step / 10 for step in range(1, 11))
 DEFAULT_MODEL_ID = "LiquidAI/LFM2.5-1.2B-Thinking"
 DEFAULT_LORA_REPOSITORY = "Heroi/multitune-lora-backup"
 DEFAULT_LAYER = "model.layers.8.feed_forward"
-DATA_DIRECTORY = Path(__file__).resolve().parent / "data"
+DATA_DIRECTORY = Path("data")
 COMPOSITIONAL_DATA_DIRECTORY = (
     Path(__file__).resolve().parents[1]
     / "compositional_explanations"
@@ -165,7 +165,7 @@ def _load_dataset(name, *, split):
 
 
 def _select_neurons(formula_path, *, output_directory, weight_column_names):
-    from theoretical.ablation.selection import run_ablation_analysis
+    from selection import run_ablation_analysis
 
     return run_ablation_analysis(
         formula_path,
@@ -184,7 +184,7 @@ def _build_inference_engine(
     class_token_ids,
     lora_path,
 ):
-    from theoretical.ablation.inference import (
+    from inference import (
         AblationInferenceEngine,
         AblationTaskConfig,
     )

@@ -23,7 +23,7 @@ from postprocessing import (
     prune_min_acts,
     threshold,
 )
-from new_search.algorithm import (
+from search.algorithm import (
     searchConfig,
     search_all,
 )
@@ -32,7 +32,7 @@ from new_search.algorithm import (
 DEFAULT_MODEL_ID = "LiquidAI/LFM2.5-1.2B-Thinking"
 DEFAULT_LORA_REPOSITORY = "Heroi/multitune-lora-backup"
 ACTIVATION_DATA_DIRECTORY = Path(__file__).resolve().parents[2] / "data"
-DATA_DIRECTORY = Path(__file__).resolve().parent / "data"
+DATA_DIRECTORY = Path("data")
 
 
 def activation_path(
@@ -263,17 +263,19 @@ def run(
         binary_activations,
         min_acts=task.min_acts,
     )
-    search_results = search_all(
-        searchable_activations.matrix,
-        features,
-        num_workers=num_workers,
-        config=config or searchConfig(
-            formula_length=5,
-            pruned_queue_size=10,
-            max_iterations=10,
-            length_penalty=0.0,
-        ),
-    )
+    if config is None:
+        search_results = search_all(
+            searchable_activations.matrix,
+            features,
+            num_workers=num_workers,
+        )
+    else:
+        search_results = search_all(
+            searchable_activations.matrix,
+            features,
+            num_workers=num_workers,
+            config=config,
+        )
 
     classification_weights = load_classification_weights(
         task,

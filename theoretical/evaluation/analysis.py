@@ -16,6 +16,7 @@ from peft import PeftModel
 
 DEFAULT_MODEL_ID = "LiquidAI/LFM2.5-1.2B-Thinking"
 DEFAULT_LORA_REPOSITORY = "Heroi/multitune-lora-backup"
+DATA_DIRECTORY = Path("data")
 
 SNLI_LABELS = ["entailment", "neutral", "contradiction"]
 FALLACY_LABELS = [

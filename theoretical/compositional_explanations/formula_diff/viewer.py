@@ -7,9 +7,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-from theoretical.compositional_explanations.formula_diff import (
-    analysis as formula_diff,
-)
+from . import analysis as formula_diff
 
 
 DEFAULT_FORMULA_DIFF_DIR = Path("14th") / "results" / "formula_diff"
