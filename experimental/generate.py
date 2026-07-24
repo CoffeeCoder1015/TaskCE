@@ -100,6 +100,7 @@ for dataset_name, dataset in (
                 example["prompt"],
                 add_generation_prompt=True,
                 tokenize=True,
+                return_dict=False,
             )
         }
     )
