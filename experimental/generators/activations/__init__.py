@@ -6,7 +6,7 @@ from typing import Any
 
 import torch
 
-from experimental.model import CaptureIdentity, WrappedModel
+from model import CaptureIdentity, WrappedModel
 
 
 def append_final_token(current, _module, _inputs, output):

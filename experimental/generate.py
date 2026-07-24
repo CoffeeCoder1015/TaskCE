@@ -9,9 +9,9 @@ from datasets import load_dataset
 from peft import PeftModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-from experimental.generators.activations import generate_final_token_activations
-from experimental.lora_checkpoints import latest_task_lora_checkpoints
-from experimental.model import CaptureIdentity, WrappedModel
+from generators.activations import generate_final_token_activations
+from lora_checkpoints import latest_task_lora_checkpoints
+from model import CaptureIdentity, WrappedModel
 
 
 def format_snli(example):
