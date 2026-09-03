@@ -36,27 +36,29 @@ flowchart TB
 
 The project separates collecting core input data from analyzing it. This diagram shows that broad organization rather than dependencies among individual analyses.
 
-## [Core data acquisition](experimental/)
+## Core data acquisition
 
-The acquisition stage uses PyTorch forward hooks to capture the final-token output of selected model layers. Activations are saved as matrices where each row represents a dataset example and each column represents a neuron.
+The [acquisition code](experimental/) uses PyTorch forward hooks to capture the final-token output of selected model layers. Activations are saved as matrices where each row represents a dataset example and each column represents a neuron.
 
 The generation script currently captures activations from the base model and available task-specific LoRA checkpoints.
 
-## [Analyses](theoretical/)
+## Analyses
 
-### [Activation analysis](theoretical/activations/)
+The [analysis code](theoretical/) is organized into the areas below.
 
-These analyses operate directly on saved activation matrices.
+### Activation analysis
+
+The [activation analyses](theoretical/activations/) operate directly on saved activation matrices.
 
 - **Threshold coverage** measures how many examples activate each neuron after applying a per-neuron quantile threshold. It helps determine whether enough activation evidence exists for formula search.
 - **Task separation** applies PCA to the activation space and measures how examples from different task classes are distributed.
 - **Neuron fate** compares base and fine-tuned activation spaces. It measures direct neuron correspondence, affine relationships, cross-model similarity, and possible movement of behavior between neurons.
 
-### [Compositional explanations](theoretical/compositional_explanations/)
+### Compositional explanations
 
-This component searches for readable formulas that approximate neuron activation patterns. Dataset text is converted into binary token-presence features. These features are combined with logical `AND`, `OR`, and `NOT` operations. Candidate formulas are scored by intersection over union with each thresholded neuron activation vector.
+The [compositional explanation analysis](theoretical/compositional_explanations/) searches for readable formulas that approximate neuron activation patterns. Dataset text is converted into binary token-presence features. These features are combined with logical `AND`, `OR`, and `NOT` operations. Candidate formulas are scored by intersection over union with each thresholded neuron activation vector.
 
-The component contains:
+The analysis contains:
 
 - tokenization and feature construction;
 - activation thresholding and low-activation pruning;
@@ -70,19 +72,19 @@ The [**fully vectorized search**](theoretical/compositional_explanations/new_sea
 
 The earlier batched implementation substantially reduced the memory requirements of the [**original NLI compositional search**](https://github.com/jayelm/compexp/blob/master/nli/code/analyze.py) by partitioning neurons across workers and batching each neuron's candidate IoU evaluations on the GPU.
 
-### [Graph analysis](theoretical/graph_analysis/)
+### Graph analysis
 
-This component studies relationships between neurons within an activation space. It constructs neuron graphs from Pearson correlation or cosine similarity, removes weaker edges, detects communities, identifies highly connected neurons, and attaches compositional formulas to the resulting graph structure.
+The [graph analysis](theoretical/graph_analysis/) studies relationships between neurons within an activation space. It constructs neuron graphs from Pearson correlation or cosine similarity, removes weaker edges, detects communities, identifies highly connected neurons, and attaches compositional formulas to the resulting graph structure.
 
 This provides a view of how groups of related neurons are organized before and after fine-tuning.
 
-### [Ablation analysis](theoretical/ablation/)
+### Ablation analysis
 
-This component tests whether neurons identified by the explanation search affect model behavior. Neurons are ranked using their formula scores and classification weights. Selected groups are then disabled during inference, allowing their effect on task accuracy and class predictions to be measured.
+The [ablation analysis](theoretical/ablation/) tests whether neurons identified by the explanation search affect model behavior. Neurons are ranked using their formula scores and classification weights. Selected groups are then disabled during inference, allowing their effect on task accuracy and class predictions to be measured.
 
-### [Evaluation](theoretical/evaluation/)
+### Evaluation
 
-This component evaluates base and LoRA-adapted models on their classification tasks. It records successful predictions, incorrect predictions, rejected outputs, and overall accuracy. These measurements separate visible task improvement from changes found by the internal analyses.
+The [evaluation code](theoretical/evaluation/) compares base and LoRA-adapted models on their classification tasks. It records successful predictions, incorrect predictions, rejected outputs, and overall accuracy. These measurements separate visible task improvement from changes found by the internal analyses.
 
 ## Current study
 
