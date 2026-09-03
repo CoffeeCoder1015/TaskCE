@@ -60,10 +60,15 @@ The component contains:
 
 - tokenization and feature construction;
 - activation thresholding and low-activation pruning;
-- several beam-search and vectorized search implementations;
 - symbolic formula rendering and simplification;
 - structural comparison of base and fine-tuned formulas;
 - CSV and HTML outputs for inspecting formula differences.
+
+#### Search implementations
+
+The [**fully vectorized search**](theoretical/compositional_explanations/new_search/algorithm.py) substantially improves the throughput of the earlier [**batched per-neuron GPU search**](theoretical/compositional_explanations/search/algorithm.py) by vectorizing scoring across neurons, beam states, candidate features, and composition operators. Boolean activation and feature vectors are bit-packed, while [**Triton kernels**](theoretical/compositional_explanations/new_search/kernels.py) perform the IoU calculations directly on the GPU.
+
+The earlier batched implementation substantially reduced the memory requirements of the [**original NLI compositional search**](https://github.com/jayelm/compexp/blob/master/nli/code/analyze.py) by partitioning neurons across workers and batching each neuron's candidate IoU evaluations on the GPU.
 
 ### [Graph analysis](theoretical/graph_analysis/)
 
