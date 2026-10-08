@@ -16,8 +16,9 @@ them. Malformed formulas raise an error identifying the neuron.
 The notebook translates each usable AST with `to_z3` and adds it to one
 `z3.Solver`, available as `solver` for subsequent analysis. Every complete
 feature name denotes the same Boolean variable across all formulas. Each
-formula is asserted as true, so the solver requires all formulas to hold
-together. Pruned and empty rows contribute no constraint. IoU and class
+formula defines a Boolean named `neuron_<neuron_id>` through equality, so the
+neuron is true exactly when its formula is true. Pruned and empty rows
+contribute no constraint. IoU and class
 weights remain metadata and do not affect the assertions.
 
 The notebook stops after loading the constraints; it does not call `check()`
