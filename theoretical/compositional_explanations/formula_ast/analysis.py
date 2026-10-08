@@ -5,6 +5,7 @@ from pathlib import Path
 import re
 
 import pandas as pd
+import z3
 
 
 @dataclass(frozen=True)
@@ -14,6 +15,21 @@ class FormulaNode:
     kind: str
     value: str | bool | None = None
     children: tuple["FormulaNode", ...] = ()
+
+
+def to_z3(node: FormulaNode) -> z3.BoolRef:
+    """Translate a parsed formula using shared Boolean feature names."""
+    if node.kind == "atom":
+        return z3.Bool(node.value)
+    if node.kind == "constant":
+        return z3.BoolVal(node.value)
+    if node.kind == "NOT":
+        return z3.Not(to_z3(node.children[0]))
+    if node.kind == "AND":
+        return z3.And(*(to_z3(child) for child in node.children))
+    if node.kind == "OR":
+        return z3.Or(*(to_z3(child) for child in node.children))
+    raise ValueError(f"Unknown formula node kind {node.kind!r}")
 
 
 def parse_formula(text: str) -> FormulaNode:

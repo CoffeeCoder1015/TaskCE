@@ -13,9 +13,15 @@ and child order. `True` and `False` are Boolean constants. Empty formulas and
 `LOW_ACTS_PRUNED` have `ast=None`; their original formula text distinguishes
 them. Malformed formulas raise an error identifying the neuron.
 
-The notebook stops at loading and inspection, leaving the experiment open for
-subsequent analysis. Z3 is available as `import z3` through the project's
-`z3-solver` dependency; no solver query or AST translation is imposed here.
+The notebook translates each usable AST with `to_z3` and adds it to one
+`z3.Solver`, available as `solver` for subsequent analysis. Every complete
+feature name denotes the same Boolean variable across all formulas. Each
+formula is asserted as true, so the solver requires all formulas to hold
+together. Pruned and empty rows contribute no constraint. IoU and class
+weights remain metadata and do not affect the assertions.
+
+The notebook stops after loading the constraints; it does not call `check()`
+or request a model. Re-running the solver cell creates a fresh solver.
 
 The AST reconstructs the formula saved in the CSV. It cannot recover the search
 ancestry or token IDs that the CSV does not contain. Like the search rendering
