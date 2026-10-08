@@ -18,11 +18,21 @@ The notebook translates each usable AST with `to_z3` and adds it to one
 feature name denotes the same Boolean variable across all formulas. Each
 formula defines a Boolean named `neuron_<neuron_id>` through equality, so the
 neuron is true exactly when its formula is true. Pruned and empty rows
-contribute no constraint. IoU and class
-weights remain metadata and do not affect the assertions.
+contribute no constraint. IoU and class weights remain metadata and do not
+affect the assertions.
 
-The notebook stops after loading the constraints; it does not call `check()`
-or request a model. Re-running the solver cell creates a fresh solver.
+The final cell copies the constraints into `enumeration_solver`, records each
+satisfying neuron pattern, and excludes that pattern before solving again.
+Enumeration stops at `unsat`. An `unknown` result raises an error rather than
+reporting partial enumeration as complete. The original `solver` remains
+available with its constraints intact.
+
+`activation_patterns` is a Boolean DataFrame whose columns are the CSV neuron
+IDs with usable formulas. Each row is a distinct satisfying pattern, regardless
+of how many feature assignments produce it. Enumeration has no cutoff and
+stores all patterns in memory. With no usable formulas, the projection has one
+empty pattern. Re-running the cell starts enumeration from the original
+constraints again.
 
 The AST reconstructs the formula saved in the CSV. It cannot recover the search
 ancestry or token IDs that the CSV does not contain. Like the search rendering
