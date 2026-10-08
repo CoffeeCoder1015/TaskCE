@@ -84,7 +84,48 @@ def select_semantic_candidates(
     Empty meanings, all original atomic meanings, and current parent meanings
     are excluded. Earlier levels do not contribute additional exclusions.
     """
-    raise NotImplementedError("Semantic selection is added in the next stage.")
+    flat_scores = candidate_scores.flatten(start_dim=1)
+    candidate_count = flat_scores.shape[1]
+    word_count = parent_vectors.shape[2]
+    empty_meaning = parent_vectors.new_zeros((1, word_count))
+    selected_vectors, selected_scores, selected_indices = [], [], []
+    for neuron in range(candidate_scores.shape[0]):
+        ranked_scores, score_order = torch.sort(
+            flat_scores[neuron], descending=True, stable=True
+        )
+        parents = parent_vectors[neuron, :, None, :]
+        features = packed_features[retained_features[neuron]][None, :, :]
+        candidate_vectors = torch.stack(
+            (parents & features, parents | features, parents & ~features), dim=2
+        ).reshape(candidate_count, word_count)
+        excluded_vectors = torch.cat(
+            (empty_meaning, packed_features, parent_vectors[neuron])
+        )
+        meanings, meaning_ids = torch.unique(
+            torch.cat((excluded_vectors, candidate_vectors)), dim=0, return_inverse=True
+        )
+        excluded_count = excluded_vectors.shape[0]
+        ranked_meaning_ids = meaning_ids[excluded_count:][score_order]
+        excluded_meanings = torch.zeros(
+            meanings.shape[0], dtype=torch.bool, device=candidate_scores.device
+        )
+        excluded_meanings[meaning_ids[:excluded_count]] = True
+        ranks = torch.arange(candidate_count, device=candidate_scores.device)
+        first_rank = torch.full(
+            (meanings.shape[0],), candidate_count,
+            dtype=torch.int64, device=candidate_scores.device,
+        )
+        first_rank.scatter_reduce_(0, ranked_meaning_ids, ranks, reduce="amin")
+        eligible = (
+            torch.isfinite(ranked_scores)
+            & ~excluded_meanings[ranked_meaning_ids]
+            & (ranks == first_rank[ranked_meaning_ids])
+        )
+        chosen_ranks = torch.topk(
+            torch.where(eligible, ranks, candidate_count),
+            beam_size, largest=False, sorted=True,
+        ).values
+        raise NotImplementedError("Unoccupied selection slots are handled in the next stage.")
 
 
 def search_batch(
