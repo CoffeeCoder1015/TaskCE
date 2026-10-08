@@ -5,3 +5,4 @@ __pycache__
 deploy
 *.egg-info
 unsloth_compiled_cache
+/data/
