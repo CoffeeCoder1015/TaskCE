@@ -58,6 +58,35 @@ class FormulaHistory:
 
 
 
+@dataclass(frozen=True)
+class CandidateSelection:
+    """Selected meanings, scores, and original flat candidate identities.
+
+    Indices flatten [parent slot, retained feature slot, operation]. A finite
+    score identifies a selected slot; filler indices are safe to gather.
+    """
+
+    vectors: torch.Tensor
+    scores: torch.Tensor
+    indices: torch.Tensor
+
+
+
+def select_semantic_candidates(
+    candidate_scores: torch.Tensor,
+    parent_vectors: torch.Tensor,
+    packed_features: torch.Tensor,
+    retained_features: torch.Tensor,
+    beam_size: int,
+) -> CandidateSelection:
+    """Keep the earliest score-ranked representative of each allowed meaning.
+
+    Empty meanings, all original atomic meanings, and current parent meanings
+    are excluded. Earlier levels do not contribute additional exclusions.
+    """
+    raise NotImplementedError("Semantic selection is added in the next stage.")
+
+
 def search_batch(
     batch_neurons: torch.Tensor,
     packed_features: torch.Tensor,
@@ -94,4 +123,41 @@ def search_batch(
         feature_ids=torch.empty((batch_size, history_capacity), dtype=torch.int64, device=device),
     )
     neuron_rows = torch.arange(batch_size, device=device)[:, None]
-    raise NotImplementedError("Beam expansion has not been assembled yet.")
+    for formula_length in range(1, config.maximum_formula_length + 1):
+        improved = beam.scores[:, 0] > best_scores
+        best_scores = torch.where(improved, beam.scores[:, 0], best_scores)
+        best_ids = torch.where(improved, beam.formula_ids[:, 0], best_ids)
+        if formula_length == config.maximum_formula_length:
+            break
+        parent_valid = torch.isfinite(beam.scores)
+        active = parent_valid.any(dim=1)
+        candidate_scores = score_compositions(
+            batch_neurons, beam.vectors, packed_features, retained_features,
+            parent_valid, retained_valid, active,
+        )
+        selection = select_semantic_candidates(
+            candidate_scores, beam.vectors, packed_features, retained_features, beam_size
+        )
+        operations = selection.indices.remainder(OPERATION_COUNT)
+        parent_feature_slots = torch.div(
+            selection.indices, OPERATION_COUNT, rounding_mode="floor"
+        )
+        feature_slots = parent_feature_slots.remainder(retained_count)
+        parent_slots = torch.div(parent_feature_slots, retained_count, rounding_mode="floor")
+        node_start = (formula_length - 1) * beam_size
+        node_stop = node_start + beam_size
+        history.operations[:, node_start:node_stop] = operations
+        history.parent_ids[:, node_start:node_stop] = beam.formula_ids[
+            neuron_rows, parent_slots
+        ]
+        history.feature_ids[:, node_start:node_stop] = retained_features[
+            neuron_rows, feature_slots
+        ]
+        composite_ids = (
+            feature_count + node_start + torch.arange(beam_size, device=device)[None, :]
+        ).expand(batch_size, -1)
+        beam = Beam(
+            vectors=selection.vectors, scores=selection.scores, formula_ids=composite_ids
+        )
+
+    raise NotImplementedError("Winner reconstruction is added in final assembly.")
