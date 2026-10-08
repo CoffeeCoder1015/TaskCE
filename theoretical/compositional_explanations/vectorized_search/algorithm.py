@@ -125,7 +125,22 @@ def select_semantic_candidates(
             torch.where(eligible, ranks, candidate_count),
             beam_size, largest=False, sorted=True,
         ).values
-        raise NotImplementedError("Unoccupied selection slots are handled in the next stage.")
+        occupied = chosen_ranks < candidate_count
+        gather_ranks = chosen_ranks.clamp_max(candidate_count - 1)
+        chosen_indices = score_order[gather_ranks]
+        selected_vectors.append(
+            candidate_vectors[chosen_indices].masked_fill(~occupied[:, None], 0)
+        )
+        selected_scores.append(
+            ranked_scores[gather_ranks].masked_fill(~occupied, -torch.inf)
+        )
+        selected_indices.append(chosen_indices)
+    return CandidateSelection(
+        vectors=torch.stack(selected_vectors),
+        scores=torch.stack(selected_scores),
+        indices=torch.stack(selected_indices),
+    )
+
 
 
 def search_batch(
@@ -138,7 +153,7 @@ def search_batch(
     """Search one packed neuron batch; keep best scores across all beam levels."""
     batch_size = batch_neurons.shape[0]
     feature_count = packed_features.shape[0]
-    beam_size = config.beam_size
+    beam_size = min(config.beam_size, feature_count)
     device = batch_neurons.device
     atom_scores = score_atoms(batch_neurons, packed_features)
     retained_count = max(beam_size, int((atom_scores > 0).sum(dim=1).max().item()))
@@ -171,7 +186,7 @@ def search_batch(
         if formula_length == config.maximum_formula_length:
             break
         parent_valid = torch.isfinite(beam.scores)
-        active = parent_valid.any(dim=1)
+        active = parent_valid.any(dim=1) & (best_scores < 1.0)
         candidate_scores = score_compositions(
             batch_neurons, beam.vectors, packed_features, retained_features,
             parent_valid, retained_valid, active,

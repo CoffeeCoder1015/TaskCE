@@ -11,3 +11,5 @@ This is a deliberately incomplete algorithm scaffold, not a runnable search vari
 3. The bounded-depth coordinator now records strict winner improvements, scores compositions, decodes parent/feature/operator origins, appends ancestry, and advances the beam. Semantic selection explicitly raises until the next checkpoint. Winner reconstruction remains unfinished; the coordinator is not a working search variant.
 
 4. Semantic selection now orders scores stably, materializes Boolean compositions, excludes empty meanings, all original atomic meanings, and current parents, groups equal rows, finds each meaning's minimum rank, and ranks eligible representatives. It explicitly raises before filling vacant slots or gathering results.
+
+5. Selection now gathers occupied meanings and makes vacant slots zero vectors with negative-infinity scores and safe origin indices. Effective beam width is capped by atomic feature count. Parents with no finite scores and neurons already at IoU 1 do not expand. Exhausted or insufficient unique meanings remain vacant and cannot become fake winning formulas. Length one skips expansion. Winner reconstruction is still explicitly unfinished.
