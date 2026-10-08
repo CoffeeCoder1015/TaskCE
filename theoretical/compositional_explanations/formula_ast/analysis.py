@@ -1,5 +1,6 @@
 """Load compositional search CSVs for subsequent formula experiments."""
 
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 import re
@@ -33,16 +34,25 @@ def to_z3(node: FormulaNode) -> z3.BoolRef:
 
 
 def parse_formula(text: str) -> FormulaNode:
-    """Parse search's parenthesized syntax without algebraic normalization."""
-    tokens = re.findall(r"\(|\)|[^\s()]+", text)
-    index = 0
+    """Preserve the written tree described by search's expression grammar.
 
-    def expression() -> FormulaNode:
-        nonlocal index
-        if index == len(tokens):
+    expression := atom | True | False | '(' compound ')'
+    compound   := NOT expression
+                | expression AND expression (AND expression)*
+                | expression OR expression (OR expression)*
+    """
+    tokens = deque(re.findall(r"\(|\)|[^\s()]+", text))
+
+    def peek() -> str | None:
+        return tokens[0] if tokens else None
+
+    def take() -> str:
+        if not tokens:
             raise ValueError("Unexpected end of formula")
-        token = tokens[index]
-        index += 1
+        return tokens.popleft()
+
+    def parse_expression() -> FormulaNode:
+        token = take()
         if token != "(":
             if token in {"AND", "OR", "NOT", ")", "LOW_ACTS_PRUNED"}:
                 raise ValueError(f"Expected an atom, got {token!r}")
@@ -50,27 +60,29 @@ def parse_formula(text: str) -> FormulaNode:
                 return FormulaNode("constant", token == "True")
             return FormulaNode("atom", token)
 
-        if index < len(tokens) and tokens[index] == "NOT":
-            index += 1
-            node = FormulaNode("NOT", children=(expression(),))
-        else:
-            children = [expression()]
-            if index == len(tokens) or tokens[index] not in {"AND", "OR"}:
-                raise ValueError("Expected AND or OR")
-            operator = tokens[index]
-            while index < len(tokens) and tokens[index] == operator:
-                index += 1
-                children.append(expression())
-            node = FormulaNode(operator, children=tuple(children))
-
-        if index == len(tokens) or tokens[index] != ")":
+        node = parse_compound()
+        if peek() != ")":
             raise ValueError("Expected closing parenthesis")
-        index += 1
+        take()
         return node
 
-    node = expression()
-    if index != len(tokens):
-        raise ValueError(f"Unexpected token {tokens[index]!r}")
+    def parse_compound() -> FormulaNode:
+        if peek() == "NOT":
+            take()
+            return FormulaNode("NOT", children=(parse_expression(),))
+
+        children = [parse_expression()]
+        operator = peek()
+        if operator not in {"AND", "OR"}:
+            raise ValueError("Expected AND or OR")
+        while peek() == operator:
+            take()
+            children.append(parse_expression())
+        return FormulaNode(operator, children=tuple(children))
+
+    node = parse_expression()
+    if tokens:
+        raise ValueError(f"Unexpected token {peek()!r}")
     return node
 
 
