@@ -6,6 +6,16 @@ import triton
 import triton.language as tl
 
 
+def pack_vectors(vectors: np.ndarray, device: torch.device) -> torch.Tensor:
+    """Pack rows into little-bit-order int32 words, with zero tail padding."""
+    packed_bytes = np.packbits(vectors, axis=1, bitorder="little")
+    padding_bytes = -packed_bytes.shape[1] % 4
+    if padding_bytes:
+        packed_bytes = np.pad(packed_bytes, ((0, 0), (0, padding_bytes)))
+    packed_words = np.ascontiguousarray(packed_bytes).view(np.int32)
+    return torch.from_numpy(packed_words).to(device=device)
+
+
 @triton.jit
 def popcount32(words):
     return tl.inline_asm_elementwise(
@@ -52,6 +62,25 @@ def score_atomic_kernel(
         scores + neuron * feature_count + feature,
         packed_iou(target_words, feature_words),
     )
+
+
+def score_atoms(batch_neurons: torch.Tensor, packed_features: torch.Tensor) -> torch.Tensor:
+    """Score [batch, features]; a program handles one neuron/feature pair."""
+    batch_size, word_count = batch_neurons.shape
+    feature_count = packed_features.shape[0]
+    scores = torch.empty(
+        (batch_size, feature_count), dtype=torch.float32, device=batch_neurons.device
+    )
+    score_atomic_kernel[batch_size, feature_count](
+        batch_neurons,
+        packed_features,
+        scores,
+        feature_count,
+        word_count,
+        BLOCK_WIDTH=triton.next_power_of_2(word_count),
+        num_warps=4,
+    )
+    return scores
 
 
 @triton.jit
@@ -123,35 +152,6 @@ def score_composition_kernel(
             -float("inf"),
         ),
     )
-
-
-def pack_vectors(vectors: np.ndarray, device: torch.device) -> torch.Tensor:
-    """Pack rows into little-bit-order int32 words, with zero tail padding."""
-    packed_bytes = np.packbits(vectors, axis=1, bitorder="little")
-    padding_bytes = -packed_bytes.shape[1] % 4
-    if padding_bytes:
-        packed_bytes = np.pad(packed_bytes, ((0, 0), (0, padding_bytes)))
-    packed_words = np.ascontiguousarray(packed_bytes).view(np.int32)
-    return torch.from_numpy(packed_words).to(device=device)
-
-
-def score_atoms(batch_neurons: torch.Tensor, packed_features: torch.Tensor) -> torch.Tensor:
-    """Score [batch, features]; a program handles one neuron/feature pair."""
-    batch_size, word_count = batch_neurons.shape
-    feature_count = packed_features.shape[0]
-    scores = torch.empty(
-        (batch_size, feature_count), dtype=torch.float32, device=batch_neurons.device
-    )
-    score_atomic_kernel[batch_size, feature_count](
-        batch_neurons,
-        packed_features,
-        scores,
-        feature_count,
-        word_count,
-        BLOCK_WIDTH=triton.next_power_of_2(word_count),
-        num_warps=4,
-    )
-    return scores
 
 
 def score_compositions(

@@ -23,53 +23,11 @@ class SearchConfig:
     neuron_batch_size: int = 8
 
 
-
 @dataclass(frozen=True)
 class SearchResult:
     activation_index: int
     best_formula: str
     best_score: float
-
-
-
-@dataclass(frozen=True)
-class Beam:
-    """Per-neuron meanings [batch, beam, words] and their formula identities.
-
-    A finite score identifies an occupied slot; unoccupied vectors are zero.
-    """
-
-    vectors: torch.Tensor
-    scores: torch.Tensor
-    formula_ids: torch.Tensor
-
-
-
-@dataclass(frozen=True)
-class FormulaHistory:
-    """Append-only ancestry [batch, (maximum length - 1) * beam].
-
-    Atomic IDs are feature indices. Composite ID F + j addresses column j.
-    """
-
-    operations: torch.Tensor
-    parent_ids: torch.Tensor
-    feature_ids: torch.Tensor
-
-
-
-@dataclass(frozen=True)
-class CandidateSelection:
-    """Selected meanings, scores, and original flat candidate identities.
-
-    Indices flatten [parent slot, retained feature slot, operation]. A finite
-    score identifies a selected slot; filler indices are safe to gather.
-    """
-
-    vectors: torch.Tensor
-    scores: torch.Tensor
-    indices: torch.Tensor
-
 
 
 def select_semantic_candidates(
@@ -78,8 +36,8 @@ def select_semantic_candidates(
     packed_features: torch.Tensor,
     retained_features: torch.Tensor,
     beam_size: int,
-) -> CandidateSelection:
-    """Keep the earliest score-ranked representative of each allowed meaning.
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return selected vectors, scores, and flat origins for allowed meanings.
 
     Empty meanings, all original atomic meanings, and current parent meanings
     are excluded. Earlier levels do not contribute additional exclusions.
@@ -135,12 +93,65 @@ def select_semantic_candidates(
             ranked_scores[gather_ranks].masked_fill(~occupied, -torch.inf)
         )
         selected_indices.append(chosen_indices)
-    return CandidateSelection(
-        vectors=torch.stack(selected_vectors),
-        scores=torch.stack(selected_scores),
-        indices=torch.stack(selected_indices),
+    return (
+        torch.stack(selected_vectors),
+        torch.stack(selected_scores),
+        torch.stack(selected_indices),
     )
 
+
+@dataclass(frozen=True)
+class FormulaHistory:
+    """Append-only ancestry [batch, (maximum length - 1) * beam].
+
+    Atomic IDs are feature indices. Composite ID F + j addresses column j.
+    """
+
+    operations: torch.Tensor
+    parent_ids: torch.Tensor
+    feature_ids: torch.Tensor
+
+
+def reconstruct_formula(formula_id: int, feature_formulas: list[Symbol], history: FormulaHistory):
+    """Follow one winning ancestry chain into SymPy Boolean expressions."""
+    if formula_id < len(feature_formulas):
+        return feature_formulas[formula_id]
+    node = formula_id - len(feature_formulas)
+    parent = reconstruct_formula(int(history.parent_ids[node]), feature_formulas, history)
+    feature = feature_formulas[int(history.feature_ids[node])]
+    operation = int(history.operations[node])
+    if operation == AND:
+        return And(parent, feature)
+    if operation == OR:
+        return Or(parent, feature)
+    if operation == AND_NOT:
+        return And(parent, Not(feature))
+    raise ValueError(f"Unknown composition operation {operation}.")
+
+
+def render_formula(formula) -> str:
+    """Render SymPy's simplified expression using the established search syntax."""
+    if isinstance(formula, Symbol):
+        return str(formula)
+    if formula.func is Not:
+        return f"(NOT {render_formula(formula.args[0])})"
+    if formula.func is And:
+        return f"({' AND '.join(render_formula(arg) for arg in formula.args)})"
+    if formula.func is Or:
+        return f"({' OR '.join(render_formula(arg) for arg in formula.args)})"
+    return str(formula)
+
+
+@dataclass(frozen=True)
+class Beam:
+    """Per-neuron meanings [batch, beam, words] and their formula identities.
+
+    A finite score identifies an occupied slot; unoccupied vectors are zero.
+    """
+
+    vectors: torch.Tensor
+    scores: torch.Tensor
+    formula_ids: torch.Tensor
 
 
 def search_batch(
@@ -191,12 +202,12 @@ def search_batch(
             batch_neurons, beam.vectors, packed_features, retained_features,
             parent_valid, retained_valid, active,
         )
-        selection = select_semantic_candidates(
+        next_vectors, next_scores, selected_indices = select_semantic_candidates(
             candidate_scores, beam.vectors, packed_features, retained_features, beam_size
         )
-        operations = selection.indices.remainder(OPERATION_COUNT)
+        operations = selected_indices.remainder(OPERATION_COUNT)
         parent_feature_slots = torch.div(
-            selection.indices, OPERATION_COUNT, rounding_mode="floor"
+            selected_indices, OPERATION_COUNT, rounding_mode="floor"
         )
         feature_slots = parent_feature_slots.remainder(retained_count)
         parent_slots = torch.div(parent_feature_slots, retained_count, rounding_mode="floor")
@@ -213,7 +224,89 @@ def search_batch(
             feature_count + node_start + torch.arange(beam_size, device=device)[None, :]
         ).expand(batch_size, -1)
         beam = Beam(
-            vectors=selection.vectors, scores=selection.scores, formula_ids=composite_ids
+            vectors=next_vectors, scores=next_scores, formula_ids=composite_ids
         )
 
-    raise NotImplementedError("Winner reconstruction is added in final assembly.")
+    best_scores, best_ids = best_scores.cpu(), best_ids.cpu()
+    history = FormulaHistory(
+        operations=history.operations.cpu(),
+        parent_ids=history.parent_ids.cpu(),
+        feature_ids=history.feature_ids.cpu(),
+    )
+    results = []
+    for neuron in range(batch_size):
+        if int(best_ids[neuron]) < 0:
+            results.append(SearchResult(
+                activation_index=activation_start + neuron,
+                best_formula="LOW_ACTS_PRUNED",
+                best_score=0.0,
+            ))
+            continue
+        neuron_history = FormulaHistory(
+            operations=history.operations[neuron],
+            parent_ids=history.parent_ids[neuron],
+            feature_ids=history.feature_ids[neuron],
+        )
+        formula = reconstruct_formula(int(best_ids[neuron]), feature_formulas, neuron_history)
+        results.append(SearchResult(
+            activation_index=activation_start + neuron,
+            best_formula=render_formula(formula),
+            best_score=float(best_scores[neuron]),
+        ))
+    return results
+
+
+def search_all(
+    activation_vectors: torch.Tensor,
+    feature_vectors: list[tuple[Symbol, np.ndarray]],
+    device: torch.device | str,
+    config: SearchConfig | None = None,
+) -> list[SearchResult]:
+    """Pack inputs once on one CUDA device and process neuron batches in order."""
+    config = SearchConfig() if config is None else config
+    if not isinstance(config, SearchConfig):
+        raise TypeError("config must be a SearchConfig.")
+    for field in ("maximum_formula_length", "beam_size", "neuron_batch_size"):
+        value = getattr(config, field)
+        if type(value) is not int or value <= 0:
+            raise ValueError(f"config.{field} must be a positive native integer.")
+    if not isinstance(activation_vectors, torch.Tensor):
+        raise TypeError("activation_vectors must be a torch.Tensor.")
+    if activation_vectors.device.type != "cpu":
+        raise ValueError("activation_vectors must be on the CPU.")
+    if activation_vectors.layout != torch.strided or activation_vectors.ndim != 2:
+        raise ValueError("activation_vectors must be a dense [examples, neurons] matrix.")
+    if activation_vectors.dtype != torch.bool:
+        raise TypeError("activation_vectors must have Boolean dtype.")
+    example_count, neuron_count = activation_vectors.shape
+    if not isinstance(feature_vectors, list):
+        raise TypeError("feature_vectors must be a list of (Symbol, Boolean array) tuples.")
+    for feature_index, entry in enumerate(feature_vectors):
+        if not isinstance(entry, tuple) or len(entry) != 2:
+            raise TypeError(f"Feature {feature_index} must be a (Symbol, array) tuple.")
+        formula, vector = entry
+        if not isinstance(formula, Symbol):
+            raise TypeError(f"Feature {feature_index} must have a SymPy Symbol.")
+        if not isinstance(vector, np.ndarray) or vector.dtype != np.bool_:
+            raise TypeError(f"Feature {feature_index} must have a NumPy Boolean array.")
+        if vector.ndim != 1 or vector.shape[0] != example_count:
+            raise ValueError(f"Feature {feature_index} must have shape [examples].")
+    device = torch.device(device)
+    if device.type != "cuda":
+        raise ValueError("device must select a CUDA device.")
+    if neuron_count > 0 and (example_count == 0 or not feature_vectors):
+        raise ValueError("Searching neurons requires examples and at least one feature.")
+    if neuron_count == 0:
+        return []
+    feature_formulas = [formula for formula, vector in feature_vectors]
+    packed_features = pack_vectors(
+        np.stack([vector for formula, vector in feature_vectors]), device
+    )
+    packed_neurons = pack_vectors(activation_vectors.numpy().T, device)
+    results = []
+    for start in range(0, packed_neurons.shape[0], config.neuron_batch_size):
+        results.extend(search_batch(
+            packed_neurons[start:start + config.neuron_batch_size],
+            packed_features, feature_formulas, start, config,
+        ))
+    return results
