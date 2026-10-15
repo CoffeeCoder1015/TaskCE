@@ -57,3 +57,24 @@ def parse_formula(text: str):
         i += 1
 
     return context[-1]["op"][0]
+
+
+def formula_to_string(expr: z3.BoolRef) -> str:
+    """Render a Boolean Z3 formula in the search output's formula syntax."""
+    if not z3.is_bool(expr):
+        raise TypeError("Expected a Boolean Z3 expression")
+    if z3.is_true(expr) or z3.is_false(expr):
+        return str(expr)
+    if z3.is_not(expr):
+        return f"(NOT {formula_to_string(expr.arg(0))})"
+    if z3.is_and(expr) or z3.is_or(expr):
+        children = [formula_to_string(child) for child in expr.children()]
+        if not children:
+            return "True" if z3.is_and(expr) else "False"
+        if len(children) == 1:
+            return children[0]
+        operator = " AND " if z3.is_and(expr) else " OR "
+        return f"({operator.join(children)})"
+    if z3.is_const(expr):
+        return str(expr.decl().name())
+    raise ValueError(f"Unsupported Z3 operator: {expr.decl().name()}")
