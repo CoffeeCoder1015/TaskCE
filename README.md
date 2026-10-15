@@ -2,6 +2,31 @@
 
 TaskCE is a research codebase for studying how fine-tuning changes the internal representations of language models. It compares a base model with task-specific LoRA variants by capturing neuron activations and analyzing which internal features remain stable, change behavior, or appear elsewhere in the model.
 
+## Development setup
+
+Install [mise](https://mise.jdx.dev/getting-started.html), then run these commands from the repository root:
+
+```sh
+mise trust
+mise install
+mise run setup
+```
+
+mise provides Python 3.12 and uv. The setup task installs the dependencies from `pyproject.toml` into `.venv`. With [mise shell activation](https://mise.jdx.dev/getting-started.html#activate-mise), the existing `.venv` is activated automatically. Commands also work through `mise exec --` without shell activation.
+
+Full dependency setup requires Linux x86_64, including WSL on Windows: the project specifies a Linux-only FlashAttention wheel built for CUDA 12.8 and PyTorch 2.10, along with NVIDIA cuGraph. GPU workloads need a compatible NVIDIA GPU and driver. mise manages Python and uv; system libraries and GPU drivers must be installed on the host.
+
+Use `mise tasks` to list the available commands:
+
+```sh
+mise run generate
+mise run formula-diff -- --layer /path/to/layer --task snli
+mise run formula-viewer -- --formula-diff-dir /path/to/layer/results/formula_diff
+mise exec -- uv run --no-sync python
+```
+
+The generation task uses the model, datasets, and checkpoint paths configured in `experimental/generate.py`. The formula tasks operate on existing analysis outputs. Run `mise run setup` after changing dependencies; the workflow tasks use the installed environment without syncing it again. Keep notebook kernels pointed at this repository's `.venv`.
+
 ## Research question
 
 Fine-tuning can improve a model's task performance without showing what changed inside the model.
