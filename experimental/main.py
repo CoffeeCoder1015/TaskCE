@@ -73,6 +73,7 @@ with Progress(
 
         progress.start_task(task)
         progress.update(task, stage="inference")
+        final_tokens = {}
         with capture(
             model,
             dataset,
@@ -80,16 +81,19 @@ with Progress(
             layers=LAYERS,
             batch_size=32,
             on_progress=lambda completed: progress.update(task, completed=completed),
-        ) as result:
-            progress.update(task, stage="[yellow]saving")
-            captured_layers = {layer for layer, _ in result}
-            for layer in captured_layers:
-                activations = torch.stack([
-                    result[layer, example][0][-1] for example in range(len(dataset))
-                ]).float()
-                path = DATA_DIRECTORY / MODEL_ID / variant / layer / "snli_activation.pt"
-                path.parent.mkdir(parents=True, exist_ok=True)
-                torch.save(activations, path)
+        ) as batches:
+            for _indices, outputs in batches:
+                for layer in outputs:
+                    # Copy the final tokens so their views do not retain the full batch.
+                    final_tokens.setdefault(layer, []).append(outputs[layer][0][:, -1].clone())
+                del outputs
+
+        progress.update(task, stage="[yellow]saving")
+        for layer, chunks in final_tokens.items():
+            activations = torch.cat(chunks)
+            path = DATA_DIRECTORY / MODEL_ID / variant / layer / "snli_activation.pt"
+            path.parent.mkdir(parents=True, exist_ok=True)
+            torch.save(activations, path)
 
         progress.update(task, stage="[green]saved")
         nodes = {"": architecture.add(Text(variant.as_posix(), style="cyan"))}
@@ -97,9 +101,9 @@ with Progress(
             if module_path:
                 parent, _, name = module_path.rpartition(".")
                 nodes[module_path] = nodes[parent].add(
-                    Text(name, style="green" if module_path in captured_layers else "")
+                    Text(name, style="green" if module_path in final_tokens else "")
                 )
 
-        del result, model
+        del final_tokens, model
 
 progress.console.print(architecture)

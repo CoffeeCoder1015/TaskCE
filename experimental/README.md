@@ -7,7 +7,6 @@
 - `prepare_snli.py` loads SNLI, formats prompts, and returns the tokenized dataset.
 - `prepare_lora.py` downloads the adapter snapshot and selects the latest checkpoint per task.
 - `hook_recorder.py` defines `HookRecorder`, which owns hooks and buffered layer outputs.
-- `capture_result.py` defines `CaptureResult`, an in-memory dictionary with a batch-writing helper.
 
 ## Running capture
 
@@ -24,23 +23,26 @@ with capture(
     tokenizer=tokenizer,
     layers=["model.layers.8.feed_forward"],
     batch_size=32,
-) as result:
-    outputs = result["model.layers.8.feed_forward", 17]
+) as batches:
+    for indices, outputs in batches:
+        for layer, invocations in outputs.items():
+            final_tokens = invocations[0][:, -1].clone()
+            # Process or save these final tokens before advancing to the next batch.
 ```
 
 Input examples are already tokenized. The tokenizer controls padding, and example IDs are input row positions. Selected modules emit tensors with a leading batch dimension. Each list contains one tensor per invocation, including every token and existing padding. Supply exact module paths, as listed in `main.py`. Hooks are installed once, and all selected layers share each forward pass. Capture runs in evaluation mode without gradient tracking and leaves the model in evaluation mode.
 
-Entering `with capture(...) as result` completes inference and removes the hooks before the caller's block begins. All captured tensors stay in CPU memory. The result is an ordinary dictionary and remains usable after the block.
+Entering `with capture(...) as batches` installs the hooks. Each iteration runs one forward pass and yields `(indices, outputs)` for that batch. Leaving the context closes the iterator and removes the hooks, including on early exit or failure. Capture does not accumulate batches; the caller owns any outputs it retains.
 
 `on_progress`, when supplied, receives the cumulative number of examples recorded after each batch. The capture code does not render terminal output.
 
-`main.py` selects the final token only during saving. This aggregation uses left-padded inputs and one sequence-by-neuron output per example. It saves float32 matrices under `data/<model-id>/base/<layer>/snli_activation.pt` and `data/<model-id>/snli/<checkpoint>/<layer>/snli_activation.pt`. Adapter layer names include the PEFT wrapper prefix. General capture does not impose this final-token policy.
+`main.py` copies the final-token slice from each batch, releasing full-token outputs before advancing inference. It concatenates those smaller chunks in dataset order and saves float32 matrices under `data/<model-id>/base/<layer>/snli_activation.pt` and `data/<model-id>/snli/<checkpoint>/<layer>/snli_activation.pt`. This uses left-padded inputs and one module invocation per example. Adapter layer names include the PEFT wrapper prefix. General capture does not impose this final-token policy.
 
-## Results
+## Batch outputs
 
 ```python
-outputs = result["model.layers.8", 17]
-outputs[0].relu_()
+indices                                      # Dataset row positions for this batch.
+outputs["model.layers.8.feed_forward"][0]      # First invocation: [batch, tokens, neurons].
 ```
 
-Each key is `(layer, example_index)`. Each value is a list of float32 CPU tensors, one per module invocation for that example, preserving padding. `write` indexes the recorder's tensors using row views. Reading, assigning, and editing values use ordinary dictionary and tensor behavior without extra copies. Saving is explicit.
+`outputs` is a dictionary keyed by resolved module path. Each value is a list of float32 CPU tensors, one per module invocation, preserving every token and padding. Rows correspond to `indices`. Keeping a batch or a view into it keeps its tensor storage alive. Copy reduced slices when retaining them, as in `main.py`. Saving is explicit.
