@@ -11,7 +11,7 @@
 
 ## Running capture
 
-Run `python experimental/main.py` from the repository root using the project environment. It requires PyTorch, Transformers, PEFT, Datasets, Accelerate, and Rich, plus access to the adapter repository. The entry point uses the full SNLI validation split (10,000 examples) and two feed-forward layers. It captures the base LFM model and the latest SNLI adapter from `LORA_REPO`, loading a fresh model for each. Edit `MODEL_ID`, `LORA_REPO`, `DATASET_SPLIT`, and `LAYERS` in `main.py` for your run.
+Run `python experimental/main.py` from the repository root using the project environment. It requires PyTorch, Transformers, PEFT, Datasets, Accelerate, and Rich, plus access to the adapter repository. The entry point uses the full SNLI validation split (10,000 examples), capturing `model.embedding_norm` immediately before `lm_head` and the feed-forward outputs of layers 14 down to 8. It captures the base LFM model and the latest SNLI adapter from `LORA_REPO`, loading a fresh model for each. Edit `MODEL_ID`, `LORA_REPO`, `DATASET_SPLIT`, and `LAYERS` in `main.py` for your run.
 
 The Rich terminal display updates one inference-progress row per model. Counts advance after a whole batch is recorded across all selected layers. Once both runs are saved, it prints the model architecture tree once, with captured modules in green.
 

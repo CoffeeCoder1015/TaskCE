@@ -27,7 +27,16 @@ from capture import capture
 MODEL_ID = "LiquidAI/LFM2.5-1.2B-Thinking"
 LORA_REPO = "Heroi/multitune-lora-backup"
 DATASET_SPLIT = "validation"
-LAYERS = ["model.layers.8.feed_forward", "model.layers.14.feed_forward"]
+LAYERS = [
+    "model.embedding_norm",
+    "model.layers.14.feed_forward",
+    "model.layers.13.feed_forward",
+    "model.layers.12.feed_forward",
+    "model.layers.11.feed_forward",
+    "model.layers.10.feed_forward",
+    "model.layers.9.feed_forward",
+    "model.layers.8.feed_forward",
+]
 DATA_DIRECTORY = Path(__file__).resolve().parents[1] / "data"
 
 
