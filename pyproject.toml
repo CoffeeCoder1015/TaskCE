@@ -10,6 +10,7 @@ dependencies = [
     "datasets>=2.18.0",
     "accelerate>=0.28.0",
     "torch>=2.9.0",
+    "rich",
     "scikit-learn",
     "umap-learn",
     "scipy",

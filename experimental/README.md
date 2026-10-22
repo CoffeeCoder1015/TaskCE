@@ -11,7 +11,9 @@
 
 ## Running capture
 
-Run `python experimental/main.py` from the repository root using the project environment. It requires PyTorch, Transformers, PEFT, Datasets, and Accelerate, plus access to the adapter repository. The entry point defaults to 128 SNLI validation examples and two feed-forward layers. It captures the base LFM model and the latest SNLI adapter from `LORA_REPO`, loading a fresh model for each. Edit `MODEL_ID`, `LORA_REPO`, `DATASET_SPLIT`, and `LAYERS` in `main.py` for your run.
+Run `python experimental/main.py` from the repository root using the project environment. It requires PyTorch, Transformers, PEFT, Datasets, Accelerate, and Rich, plus access to the adapter repository. The entry point defaults to 128 SNLI validation examples and two feed-forward layers. It captures the base LFM model and the latest SNLI adapter from `LORA_REPO`, loading a fresh model for each. Edit `MODEL_ID`, `LORA_REPO`, `DATASET_SPLIT`, and `LAYERS` in `main.py` for your run.
+
+The Rich terminal display updates one inference-progress row per model. Counts advance after a whole batch is recorded across all selected layers. Once both runs are saved, it prints the model architecture tree once, with captured modules in green.
 
 ```python
 from capture import capture
@@ -30,7 +32,9 @@ Input examples are already tokenized. The tokenizer controls padding, and exampl
 
 Entering `with capture(...) as result` completes inference and removes the hooks before the caller's block begins. All captured tensors stay in CPU memory. The result is an ordinary dictionary and remains usable after the block.
 
-`main.py` selects the final token only during saving. This aggregation uses left-padded inputs and one sequence-by-neuron output per example. It saves float32 matrices under `data/<model-id>/base/<layer>/snli_activation.pt` and `data/<model-id>/snli/<checkpoint>/<layer>/snli_activation.pt`. Adapter layer names include the PEFT wrapper prefix. General capture does not impose this final-token policy or float32 conversion.
+`on_progress`, when supplied, receives the cumulative number of examples recorded after each batch. The capture code does not render terminal output.
+
+`main.py` selects the final token only during saving. This aggregation uses left-padded inputs and one sequence-by-neuron output per example. It saves float32 matrices under `data/<model-id>/base/<layer>/snli_activation.pt` and `data/<model-id>/snli/<checkpoint>/<layer>/snli_activation.pt`. Adapter layer names include the PEFT wrapper prefix. General capture does not impose this final-token policy.
 
 ## Results
 
@@ -39,4 +43,4 @@ outputs = result["model.layers.8", 17]
 outputs[0].relu_()
 ```
 
-Each key is `(layer, example_index)`. Each value is a list of tensors, one per module invocation for that example, preserving padding and dtype. `write` indexes the recorder's CPU tensors using row views. Reading, assigning, and editing values use ordinary dictionary and tensor behavior without extra copies. Saving is explicit.
+Each key is `(layer, example_index)`. Each value is a list of float32 CPU tensors, one per module invocation for that example, preserving padding. `write` indexes the recorder's tensors using row views. Reading, assigning, and editing values use ordinary dictionary and tensor behavior without extra copies. Saving is explicit.

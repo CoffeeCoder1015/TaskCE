@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import Any
 
@@ -18,8 +18,9 @@ def capture(
     tokenizer: Any,
     layers: list[str],
     batch_size: int = 32,
+    on_progress: Callable[[int], None] | None = None,
 ) -> Iterator[CaptureResult]:
-    """Capture all batches and yield their in-memory outputs."""
+    """Capture all batches, reporting the total examples recorded after each batch."""
     input_ids = dataset["input_ids"]
     device = next(model.parameters()).device
     model.eval()
@@ -29,6 +30,8 @@ def capture(
             with torch.no_grad():
                 model(**{name: tensor.to(device) for name, tensor in inputs.items()})
             result.write(indices, recorder.take_outputs())
+            if on_progress is not None:
+                on_progress(indices[-1] + 1)
     yield result
 
 

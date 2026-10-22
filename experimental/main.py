@@ -3,6 +3,17 @@
 from pathlib import Path
 
 from peft import PeftModel
+from rich.progress import (
+    BarColumn,
+    MofNCompleteColumn,
+    Progress,
+    TaskProgressColumn,
+    TextColumn,
+    TimeElapsedColumn,
+    TimeRemainingColumn,
+)
+from rich.text import Text
+from rich.tree import Tree
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
 from prepare_lora import get_lora_checkpoints
@@ -26,30 +37,60 @@ tokenizer.padding_side = "left"
 dataset = get_prepared_snli(tokenizer, split=DATASET_SPLIT)
 snli_checkpoint = get_lora_checkpoints(LORA_REPO)["snli"]
 
-for checkpoint in (None, snli_checkpoint):
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_ID,
-        dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
-        device_map="auto",
-    )
-    variant = Path("base")
-    if checkpoint is not None:
-        model = PeftModel.from_pretrained(model, str(checkpoint))
-        variant = Path("snli") / checkpoint.name
+architecture = Tree(Text(f"Model architecture: {MODEL_ID}", style="bold"), guide_style="dim")
 
-    with capture(
-        model,
-        dataset,
-        tokenizer=tokenizer,
-        layers=LAYERS,
-        batch_size=32,
-    ) as result:
-        for layer in {layer for layer, _ in result}:
-            activations = torch.stack([
-                result[layer, example][0][-1] for example in range(len(dataset))
-            ]).float()
-            path = DATA_DIRECTORY / MODEL_ID / variant / layer / "snli_activation.pt"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            torch.save(activations, path)
+with Progress(
+    TextColumn("[cyan]{task.description}"),
+    TextColumn("{task.fields[stage]}"),
+    BarColumn(bar_width=None),
+    TaskProgressColumn(),
+    MofNCompleteColumn(),
+    TextColumn("examples"),
+    TimeElapsedColumn(),
+    TimeRemainingColumn(),
+) as progress:
+    for checkpoint in (None, snli_checkpoint):
+        variant = Path("base") if checkpoint is None else Path("snli") / checkpoint.name
+        task = progress.add_task(
+            variant.as_posix(), total=len(dataset), start=False, stage="[yellow]loading"
+        )
+        model = AutoModelForCausalLM.from_pretrained(
+            MODEL_ID,
+            dtype=torch.bfloat16 if torch.cuda.is_available() else torch.float32,
+            device_map="auto",
+        )
+        if checkpoint is not None:
+            model = PeftModel.from_pretrained(model, str(checkpoint))
 
-    del result, model
+        progress.start_task(task)
+        progress.update(task, stage="inference")
+        with capture(
+            model,
+            dataset,
+            tokenizer=tokenizer,
+            layers=LAYERS,
+            batch_size=32,
+            on_progress=lambda completed: progress.update(task, completed=completed),
+        ) as result:
+            progress.update(task, stage="[yellow]saving")
+            captured_layers = {layer for layer, _ in result}
+            for layer in captured_layers:
+                activations = torch.stack([
+                    result[layer, example][0][-1] for example in range(len(dataset))
+                ]).float()
+                path = DATA_DIRECTORY / MODEL_ID / variant / layer / "snli_activation.pt"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                torch.save(activations, path)
+
+        progress.update(task, stage="[green]saved")
+        nodes = {"": architecture.add(Text(variant.as_posix(), style="cyan"))}
+        for module_path in dict(model.named_modules()):
+            if module_path:
+                parent, _, name = module_path.rpartition(".")
+                nodes[module_path] = nodes[parent].add(
+                    Text(name, style="green" if module_path in captured_layers else "")
+                )
+
+        del result, model
+
+progress.console.print(architecture)
