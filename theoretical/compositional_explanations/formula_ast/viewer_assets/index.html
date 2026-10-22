@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Neuron formulas</title>
+  <style>__VIEWER_STYLE__</style>
+</head>
+<body>
+  <header>
+    <h1 id="neuron-title" tabindex="-1"></h1>
+    <div class="meta" id="neuron-meta"></div>
+    <form id="jump-form">
+      <label for="neuron-id">Neuron</label>
+      <input id="neuron-id" type="number" min="0" step="1" required>
+      <button type="submit">Go</button>
+    </form>
+    <div id="jump-status" role="status"></div>
+    <button id="fit" aria-pressed="true">Full size</button>
+  </header>
+  <button class="nav prev" id="prev" aria-label="Previous neuron" title="Previous neuron (←)">‹</button>
+  <main>
+    <div class="stage" id="stage" aria-label="Formula tree">
+      <div id="canvas"><svg id="tree" xmlns="http://www.w3.org/2000/svg" role="group" aria-label="Interactive formula tree"></svg></div>
+    </div>
+    <section class="evaluation" aria-label="Evaluation">
+      <div class="result">
+        <div class="label">Output</div>
+        <div id="output" role="status" aria-live="polite"></div>
+      </div>
+      <div class="inspector">
+        <div class="label" id="inspection-title"></div>
+        <div id="calculation"></div>
+        <div id="expression"></div>
+      </div>
+      <button id="reset">Reset inputs</button>
+    </section>
+    <section class="coactivation" aria-labelledby="coactivation-title">
+      <div class="assignment">
+        <span class="label">True inputs</span><div id="true-inputs"></div>
+        <span class="assumption">Unlisted concepts are false.</span>
+      </div>
+      <div class="coactivation-head">
+        <h2 id="coactivation-title">Other true neurons</h2>
+        <span id="coactivation-count" role="status" aria-live="polite"></span>
+      </div>
+      <div id="true-neurons" aria-label="Other true neurons"></div>
+    </section>
+    <footer>
+      <details><summary>Formula & source</summary><code id="original-formula"></code>
+        <p id="source"></p><p class="fingerprint" id="fingerprint"></p>
+        <p>Formula outputs under one shared concept assignment, not measured model activations.</p>
+      </details>
+      <details><summary>Controls</summary><p>Click concepts to toggle true or false. Click operators to inspect their computation. Use ← and → to browse neurons. Inputs stay the same across neurons. Reset sets every concept to false.</p></details>
+    </footer>
+  </main>
+  <button class="nav next" id="next" aria-label="Next neuron" title="Next neuron (→)">›</button>
+  <script id="records" type="application/json">__AST_DATA__</script>
+  <script>__VIEWER_SCRIPT__</script>
+</body>
+</html>
