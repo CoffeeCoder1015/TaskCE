@@ -25,7 +25,7 @@ mise run formula-viewer -- --formula-diff-dir /path/to/layer/results/formula_dif
 mise exec -- uv run --no-sync python
 ```
 
-The generation task uses the model, datasets, and checkpoint paths configured in `experimental/generate.py`. The formula tasks operate on existing analysis outputs. Run `mise run setup` after changing dependencies; the workflow tasks use the installed environment without syncing it again. Keep notebook kernels pointed at this repository's `.venv`.
+The capture script uses the model, dataset, and checkpoint repository configured in `experimental/main.py`. Run it from the repository root with `python experimental/main.py`. The formula tasks operate on existing analysis outputs. Run `mise run setup` after changing dependencies; the workflow tasks use the installed environment without syncing it again. Keep notebook kernels pointed at this repository's `.venv`.
 
 ## Research question
 
@@ -63,9 +63,9 @@ The project separates collecting core input data from analyzing it. This diagram
 
 ## Core data acquisition
 
-The [acquisition code](experimental/) uses PyTorch forward hooks to capture the final-token output of selected model layers. Activations are saved as matrices where each row represents a dataset example and each column represents a neuron.
+The [capture API](experimental/README.md) records selected layers in one inference pass per batch and keeps the results in CPU memory. Run its SNLI entry point with `python experimental/main.py` to capture the base model and latest SNLI LoRA checkpoint. Final-token selection and saving happen separately in `main.py`, producing matrices where each row represents a dataset example and each column represents a neuron.
 
-The generation script currently captures activations from the base model and available task-specific LoRA checkpoints.
+The capture script currently processes SNLI using the base model and the latest SNLI LoRA checkpoint.
 
 ## Analyses
 
