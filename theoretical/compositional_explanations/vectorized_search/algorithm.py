@@ -1,4 +1,3 @@
-﻿import heapq
 from dataclasses import dataclass
 
 from sympy import Symbol
@@ -7,12 +6,6 @@ import sympy
 import torch
 from .formula import logic_str
 from sympy.logic import And, Or, Not
-
-@dataclass
-class SearchState:
-    formula: sympy.Expr
-    vector: torch.Tensor
-
 
 @dataclass(frozen=True)
 class SearchResult:
@@ -55,32 +48,9 @@ def calculate_ious(neuron, vectors, batch_size):
         batch = vectors[i:i+batch_size]
         iou = batched_iou(neuron, batch, neuron_count)
         output.append(iou)
-    return torch.cat(output).detach().cpu().tolist()
+    return torch.cat(output).detach()
 
 
-
-def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
-    new_compositions = []
-
-    # No checks for repetition
-    new_compositions.append(SearchState(And(current_formula, feature_formula), current_vector & feature_vector))
-    new_compositions.append(SearchState(Or(current_formula, feature_formula), current_vector | feature_vector))
-    new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), current_vector & ~feature_vector))
-    
-    # Checks for repetition
-    # c_and_f = current_vector & feature_vector
-    # if torch.any(c_and_f).item() and not torch.equal(c_and_f, current_vector) and not torch.equal(c_and_f, feature_vector):
-    #     new_compositions.append(SearchState(And(current_formula, feature_formula), c_and_f))
-
-    # c_or_f = current_vector | feature_vector
-    # if torch.any(feature_vector & ~current_vector).item() and not torch.equal(c_or_f, feature_vector):
-    #     new_compositions.append(SearchState(Or(current_formula, feature_formula), c_or_f))
-
-    # c_and_nf = current_vector & ~feature_vector
-    # if current_formula != feature_formula and torch.any(c_and_nf).item() and not torch.equal(c_and_nf, current_vector):
-    #     new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), c_and_nf))
-
-    return new_compositions
 
 @dataclass
 class SearchConfig:
@@ -97,81 +67,120 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
         print("Neuron shape:",neuron.shape)
         print("Feature shape:",concepts[0][1].shape)
 
-        states = [SearchState(formula, vector) for formula, vector in concepts]
-        vectors = torch.stack([state.vector for state in states])
+        vectors = torch.stack([vector for _, vector in concepts])
         ious = calculate_ious(neuron, vectors, config.iou_calculation_batch_size)
 
-        nonzero_features = [(iou, state) for iou, state in zip(ious, states) if iou > 0]
-        nonzero_features.sort(key=lambda x: x[0], reverse=True)
-        print("Pre/Post zero filtering:", len(states), len(nonzero_features))
+        nonzero_indices = torch.argsort(ious, descending=True, stable=True)
+        nonzero_indices = nonzero_indices[ious[nonzero_indices] > 0]
+        nonzero_vectors = vectors[nonzero_indices]
+        # Each CPU formula corresponds to the same row in the GPU tensor.
+        nonzero_formulas = [concepts[index][0] for index in nonzero_indices.cpu().tolist()]
+        print("Pre/Post zero filtering:", len(concepts), len(nonzero_formulas))
 
         beam_size = config.beam_size
-        queue = []
-        # Load queue
-        queue_id = 0
-        for iou, state in nonzero_features:
-            heapq.heappush(queue, (-iou, queue_id, state))
-            queue_id += 1
-        if len(queue) > beam_size:
-            queue = heapq.nsmallest(beam_size, queue)
-            heapq.heapify(queue)
+        beam_vectors = nonzero_vectors[:beam_size].clone()
+        beam_formulas = nonzero_formulas[:beam_size]
+        beam_ious = ious[nonzero_indices[:beam_size]]
 
         best_formula = ""
         best_score = 0
-        best_iou = 0
 
         iterations = 0
-        while queue and iterations < config.max_iterations:
-            formula_lengths = [state.formula.count(Symbol) for _, _, state in queue]
+        while beam_formulas and iterations < config.max_iterations:
+            formula_lengths = [formula.count(Symbol) for formula in beam_formulas]
             print(
                 f"neuron={activation_index} iteration={iterations + 1} "
-                f"beam={len(queue)} "
+                f"beam={len(beam_formulas)} "
                 f"formula_length={min(formula_lengths)}..{max(formula_lengths)}",
                 flush=True,
             )
-            neighbors = []
-            for rank_heuristic, _, state in queue:
-                formula = state.formula
-                vector = state.vector
-                current_iou = abs(rank_heuristic)
-                current_score = current_iou 
-                if current_score > best_score:
-                    best_formula = logic_str(formula)
-                    best_score = current_score
-                if current_iou > best_iou:
-                    best_iou = current_iou
+            # The beam is score ordered, so its first row is the current best.
+            current_score = beam_ious[0].item()
+            if current_score > best_score:
+                best_formula = logic_str(beam_formulas[0])
+                best_score = current_score
 
-                length = formula.count(Symbol)
-                if length >= config.maximum_formula_length:
-                    continue # Do not expand formula at max length
+            parent_indices = [
+                index for index, length in enumerate(formula_lengths)
+                if length < config.maximum_formula_length
+            ]
+            generated_count = 0
+            if parent_indices:
+                parent_vectors = beam_vectors[parent_indices].unsqueeze(1)
+                concept_vectors = nonzero_vectors.unsqueeze(0)
+                # [parent, concept, operation, sample]; operations are AND, OR, AND NOT.
+                compositions = torch.stack(
+                    (
+                        parent_vectors & concept_vectors,
+                        parent_vectors | concept_vectors,
+                        parent_vectors & ~concept_vectors,
+                    ),
+                    dim=2,
+                )
+                neighbor_vectors = compositions.flatten(0, 2)
+                generated_count = neighbor_vectors.shape[0]
+                unique_vectors, inverse_indices = torch.unique(
+                    neighbor_vectors, dim=0, return_inverse=True
+                )
+                # For each unique mask, keep the first original composition row.
+                original_row_indices = torch.arange(generated_count, device=neuron.device)
 
-                for _, neighbor_state in nonzero_features:
-                    for n in get_compositions(formula, vector, neighbor_state.formula, neighbor_state.vector):
-                        neighbors.append(n)
+                # magic trick from codex to not manually make a reverse mapping array
+                unique_to_original = torch.full(
+                    (unique_vectors.shape[0],), generated_count,
+                    dtype=torch.long, device=neuron.device,
+                )
+                unique_to_original.scatter_reduce_(
+                    0, inverse_indices, original_row_indices, reduce="amin"
+                )
 
-            new_queue = []
-            if neighbors:
-                neighbor_vectors = torch.stack([n.vector for n in neighbors])
-                uniqe_vecs,indicies = torch.unique(neighbor_vectors,dim=0,return_inverse=True)
-                scored_ious = calculate_ious(neuron, uniqe_vecs, config.iou_calculation_batch_size)
-                seen_indicies = set()
-                for i,idx in enumerate(indicies.detach().tolist()):
-                    if idx in seen_indicies:
-                        continue
-                    iou = scored_ious[idx]
-                    seen_indicies.add(idx)
-                    state = neighbors[i]
-                    heapq.heappush(new_queue, (-iou, queue_id, state))
-                    queue_id += 1
+                scored_ious = calculate_ious(neuron, unique_vectors, config.iou_calculation_batch_size)
+                # Start in generation order so stable score sorting preserves the old tie rule.
+                generation_order = torch.argsort(unique_to_original)
+                score_order = torch.argsort(scored_ious[generation_order], descending=True, stable=True)
+                ranked_unique_indices = generation_order[score_order]
+                selected_unique_indices = ranked_unique_indices[:beam_size]
+                selected_original_indices = unique_to_original[selected_unique_indices]
+                (
+                    selected_parent_rows,
+                    selected_concept_indices,
+                    selected_operation_indices,
+                ) = torch.unravel_index(selected_original_indices, compositions.shape[:3])
+                # Parent coordinates index the eligible subset; recover source beam rows.
+                source_parent_indices = torch.tensor(parent_indices, device=neuron.device)
+                selected_parent_indices = source_parent_indices[selected_parent_rows]
 
-            queue = new_queue
-            if len(queue) > beam_size:
-                queue = heapq.nsmallest(beam_size, queue)
-                heapq.heapify(queue)
+                next_beam_vectors = unique_vectors[selected_unique_indices]
+                next_beam_ious = scored_ious[selected_unique_indices]
+                # Transfer only the selected [parent, concept, operation] records to the CPU.
+                selected_compositions = torch.stack(
+                    (selected_parent_indices, selected_concept_indices, selected_operation_indices),
+                    dim=1,
+                ).cpu().tolist()
+                next_beam_formulas = []
+                for parent, concept, operation in selected_compositions:
+                    parent_formula = beam_formulas[parent]
+                    concept_formula = nonzero_formulas[concept]
+                    if operation == 0:
+                        formula = And(parent_formula, concept_formula)
+                    elif operation == 1:
+                        formula = Or(parent_formula, concept_formula)
+                    else:
+                        formula = And(parent_formula, Not(concept_formula))
+                    next_beam_formulas.append(formula)
+
+                # All source formulas have been read; replace the aligned beam together.
+                beam_vectors = next_beam_vectors
+                beam_ious = next_beam_ious
+                beam_formulas = next_beam_formulas
+            else:
+                beam_vectors = beam_vectors[:0]
+                beam_ious = beam_ious[:0]
+                beam_formulas = []
             iterations += 1
             print(
                 f"neuron={activation_index} iteration={iterations} "
-                f"generated={len(neighbors)} retained={len(queue)} "
+                f"generated={generated_count} retained={len(beam_formulas)} "
                 f"best_score={best_score:.6f} best_formula={best_formula}",
                 flush=True,
             )
