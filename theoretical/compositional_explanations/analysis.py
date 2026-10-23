@@ -228,6 +228,7 @@ def run(
     task_name: str,
     activation_path: str | Path,
     *,
+    search_fn=search_all,
     output_path: str | Path | None = None,
     model_id: str = DEFAULT_MODEL_ID,
     lora_repository: str = DEFAULT_LORA_REPOSITORY,
@@ -261,7 +262,7 @@ def run(
         binary_activations,
         min_acts=task.min_acts,
     )
-    search_results = search_all(
+    search_results = search_fn(
         searchable_activations.matrix,
         features,
         num_workers=num_workers,

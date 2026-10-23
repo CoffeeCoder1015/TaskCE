@@ -69,7 +69,6 @@ def test_analysis_writes_to_its_owned_data_path_by_default(tmp_path, monkeypatch
         search_call["kwargs"] = kwargs
         return []
 
-    monkeypatch.setattr(analysis_module, "search_all", fake_search_all)
     monkeypatch.setattr(
         analysis_module,
         "load_classification_weights",
@@ -85,12 +84,13 @@ def test_analysis_writes_to_its_owned_data_path_by_default(tmp_path, monkeypatch
     output_path = analysis_module.run(
         "snli",
         activation_path,
-        num_workers=1,
+        search_fn=fake_search_all,
+        num_workers=2,
     )
 
     assert output_path == tmp_path / "snli_beam_results.csv"
     assert len(search_call["args"]) == 2
-    assert search_call["kwargs"] == {"num_workers": 1}
+    assert search_call["kwargs"] == {"num_workers": 2}
     dataframe = pd.read_csv(output_path)
     assert dataframe["neuron"].tolist() == [0, 1, 2]
     assert set(dataframe["formula"]) == {"LOW_ACTS_PRUNED"}
@@ -130,17 +130,16 @@ def test_analysis_serializes_the_completed_neuron_table(tmp_path, monkeypatch):
             neuron_ids=(2,),
         ),
     )
-    monkeypatch.setattr(
-        analysis_module,
-        "search_all",
-        lambda *_args, **_kwargs: [
+
+    def fake_search_all(*_args, **_kwargs):
+        return [
             SimpleNamespace(
                 activation_index=0,
                 best_formula="premise:cat",
                 best_score=0.75,
             )
-        ],
-    )
+        ]
+
     monkeypatch.setattr(
         analysis_module,
         "load_classification_weights",
@@ -153,6 +152,7 @@ def test_analysis_serializes_the_completed_neuron_table(tmp_path, monkeypatch):
     output_path = analysis_module.run(
         "snli",
         activation_path,
+        search_fn=fake_search_all,
         output_path=tmp_path / "results.csv",
     )
     dataframe = pd.read_csv(output_path)
