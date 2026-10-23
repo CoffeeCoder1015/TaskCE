@@ -69,22 +69,22 @@ def get_compositions(current_formula, current_vector, feature_formula, feature_v
     new_compositions = []
 
     # No checks for repetition
-    # new_compositions.append(SearchState(And(current_formula, feature_formula), current_vector & feature_vector))
-    # new_compositions.append(SearchState(Or(current_formula, feature_formula), current_vector | feature_vector))
-    # new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), current_vector & ~feature_vector))
+    new_compositions.append(SearchState(And(current_formula, feature_formula), current_vector & feature_vector))
+    new_compositions.append(SearchState(Or(current_formula, feature_formula), current_vector | feature_vector))
+    new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), current_vector & ~feature_vector))
     
     # Checks for repetition
-    c_and_f = current_vector & feature_vector
-    if torch.any(c_and_f).item() and not torch.equal(c_and_f, current_vector) and not torch.equal(c_and_f, feature_vector):
-        new_compositions.append(SearchState(And(current_formula, feature_formula), c_and_f))
+    # c_and_f = current_vector & feature_vector
+    # if torch.any(c_and_f).item() and not torch.equal(c_and_f, current_vector) and not torch.equal(c_and_f, feature_vector):
+    #     new_compositions.append(SearchState(And(current_formula, feature_formula), c_and_f))
 
-    c_or_f = current_vector | feature_vector
-    if torch.any(feature_vector & ~current_vector).item() and not torch.equal(c_or_f, feature_vector):
-        new_compositions.append(SearchState(Or(current_formula, feature_formula), c_or_f))
+    # c_or_f = current_vector | feature_vector
+    # if torch.any(feature_vector & ~current_vector).item() and not torch.equal(c_or_f, feature_vector):
+    #     new_compositions.append(SearchState(Or(current_formula, feature_formula), c_or_f))
 
-    c_and_nf = current_vector & ~feature_vector
-    if current_formula != feature_formula and torch.any(c_and_nf).item() and not torch.equal(c_and_nf, current_vector):
-        new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), c_and_nf))
+    # c_and_nf = current_vector & ~feature_vector
+    # if current_formula != feature_formula and torch.any(c_and_nf).item() and not torch.equal(c_and_nf, current_vector):
+    #     new_compositions.append(SearchState(And(current_formula, Not(feature_formula)), c_and_nf))
 
     return new_compositions
 
