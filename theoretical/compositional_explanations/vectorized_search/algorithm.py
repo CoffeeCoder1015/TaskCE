@@ -59,11 +59,6 @@ def calculate_ious(neuron, vectors, batch_size):
 
 
 
-def length_penalty_factor(formula, penalty):
-    length = formula.count(Symbol)
-    return max(0.0, 1.0 - penalty * (length - 1))
-
-
 def get_compositions(current_formula, current_vector, feature_formula, feature_vector):
     new_compositions = []
 
@@ -92,7 +87,6 @@ class SearchConfig:
     maximum_formula_length: int = 5
     beam_size: int = 10
     max_iterations: int = 10
-    length_penalty: float = 0.0
     iou_calculation_batch_size: int = 16384
 
 def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Tensor]], config=SearchConfig()):
@@ -115,11 +109,8 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
         queue = []
         # Load queue
         queue_id = 0
-        penalty = config.length_penalty
-        score_track = {}
         for iou, state in nonzero_features:
             heapq.heappush(queue, (-iou, queue_id, state))
-            score_track[state.formula] = iou
             queue_id += 1
         if len(queue) > beam_size:
             queue = heapq.nsmallest(beam_size, queue)
@@ -143,7 +134,7 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
                 formula = state.formula
                 vector = state.vector
                 current_iou = abs(rank_heuristic)
-                current_score = current_iou * length_penalty_factor(formula, penalty)
+                current_score = current_iou 
                 if current_score > best_score:
                     best_formula = logic_str(formula)
                     best_score = current_score
@@ -161,15 +152,17 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
             new_queue = []
             if neighbors:
                 neighbor_vectors = torch.stack([n.vector for n in neighbors])
-                scored_ious = calculate_ious(neuron, neighbor_vectors, config.iou_calculation_batch_size)
-                for state, iou in zip(neighbors, scored_ious):
-                    key = state.formula
-                    prior_score = score_track.get(key, 0)
-                    score = iou * length_penalty_factor(state.formula, penalty)
-                    if score > prior_score:
-                        score_track[key] = score
-                        heapq.heappush(new_queue, (-iou, queue_id, state))
-                        queue_id += 1
+                uniqe_vecs,indicies = torch.unique(neighbor_vectors,dim=0,return_inverse=True)
+                scored_ious = calculate_ious(neuron, uniqe_vecs, config.iou_calculation_batch_size)
+                seen_indicies = set()
+                for idx in indicies.detach().tolist():
+                    if idx in seen_indicies:
+                        continue
+                    iou = scored_ious[idx]
+                    seen_indicies.add(idx)
+                    state = neighbors[idx]
+                    heapq.heappush(new_queue, (-iou, queue_id, state))
+                    queue_id += 1
 
             queue = new_queue
             if len(queue) > beam_size:
