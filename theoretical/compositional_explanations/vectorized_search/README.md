@@ -13,3 +13,11 @@ Triton rewrite.
 `legacy/` keeps the previous vectorized implementation for reference. The
 analysis caller still imports `../search/algorithm.py`; that original search
 and the separate `../search/batched_level.py` prototype are unchanged.
+
+To profile the existing first-neuron search, run from the repository root:
+
+```sh
+python theoretical/compositional_explanations/profile_first_neuron.py --activation <activation.pt> --output-dir <profile-output> --profile
+```
+
+The CLI prepares the configured SNLI inputs, then profiles the complete `search_all` call on CUDA, including host-to-device conversion and the final CUDA synchronization. It writes the source hash and Git HEAD with `result.json`, plus HTML, JSON, text, and Speedscope profiles. Install the optional sampler with `uv pip install pyinstrument==5.1.3`; without `--profile`, Pyinstrument is not imported. This is a host wall-clock profile and does not break down individual GPU kernels.
