@@ -155,12 +155,12 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
                 uniqe_vecs,indicies = torch.unique(neighbor_vectors,dim=0,return_inverse=True)
                 scored_ious = calculate_ious(neuron, uniqe_vecs, config.iou_calculation_batch_size)
                 seen_indicies = set()
-                for idx in indicies.detach().tolist():
+                for i,idx in enumerate(indicies.detach().tolist()):
                     if idx in seen_indicies:
                         continue
-                    iou = scored_ious[idx]
+                    iou = scored_ious[i]
                     seen_indicies.add(idx)
-                    state = neighbors[idx]
+                    state = neighbors[i]
                     heapq.heappush(new_queue, (-iou, queue_id, state))
                     queue_id += 1
 
