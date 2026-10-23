@@ -158,7 +158,7 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
                 for i,idx in enumerate(indicies.detach().tolist()):
                     if idx in seen_indicies:
                         continue
-                    iou = scored_ious[i]
+                    iou = scored_ious[idx]
                     seen_indicies.add(idx)
                     state = neighbors[i]
                     heapq.heappush(new_queue, (-iou, queue_id, state))
