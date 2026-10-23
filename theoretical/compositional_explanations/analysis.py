@@ -227,13 +227,12 @@ def load_classification_weights(
 def run(
     task_name: str,
     activation_path: str | Path,
-    *,
     search_fn=search_all,
     output_path: str | Path | None = None,
     model_id: str = DEFAULT_MODEL_ID,
     lora_repository: str = DEFAULT_LORA_REPOSITORY,
     lora_token: str | bool | None = None,
-    num_workers: int = 1,
+    **kwargs
 ) -> Path:
     """Build and save compositional explanations for one configured task."""
     task = TASKS[task_name]
@@ -265,7 +264,7 @@ def run(
     search_results = search_fn(
         searchable_activations.matrix,
         features,
-        num_workers=num_workers,
+        **kwargs
     )
 
     classification_weights = load_classification_weights(
