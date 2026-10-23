@@ -48,13 +48,12 @@ def batched_iou(neuron,binary_vecs,neuron_count=None):
     raw_scores = intersections.float() / unions.clamp_min(1).float()
     return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
 
-def calculate_ious(neuron, vector_list, batch_size):
+def calculate_ious(neuron, vectors, batch_size):
     output = []
     neuron_count = neuron.sum()
-    for i in range(0, len(vector_list), batch_size):
-        batch = vector_list[i:i+batch_size]
-        vectors = torch.stack(batch)
-        iou = batched_iou(neuron, vectors, neuron_count)
+    for i in range(0, len(vectors), batch_size):
+        batch = vectors[i:i+batch_size]
+        iou = batched_iou(neuron, batch, neuron_count)
         output.append(iou)
     return torch.cat(output).detach().cpu().tolist()
 
@@ -105,7 +104,7 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
         print("Feature shape:",concepts[0][1].shape)
 
         states = [SearchState(formula, vector) for formula, vector in concepts]
-        vectors = [state.vector for state in states]
+        vectors = torch.stack([state.vector for state in states])
         ious = calculate_ious(neuron, vectors, config.iou_calculation_batch_size)
 
         nonzero_features = [(iou, state) for iou, state in zip(ious, states) if iou > 0]
@@ -161,7 +160,7 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
 
             new_queue = []
             if neighbors:
-                neighbor_vectors = [n.vector for n in neighbors]
+                neighbor_vectors = torch.stack([n.vector for n in neighbors])
                 scored_ious = calculate_ious(neuron, neighbor_vectors, config.iou_calculation_batch_size)
                 for state, iou in zip(neighbors, scored_ious):
                     key = state.formula
