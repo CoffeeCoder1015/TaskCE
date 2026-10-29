@@ -14,16 +14,6 @@ class SearchResult:
     best_score: float
 
 
-def to_binary_tensor(value, device):
-    return torch.as_tensor(value, dtype=torch.bool, device=device)
-
-def prepare_feature_vectors(feature_vectors, device):
-    return [
-        (formula, to_binary_tensor(binary_vector, device))
-        for formula, binary_vector in feature_vectors
-    ]
-
-
 def batched_iou(neuron,binary_vecs,neuron_count=None):
     intersections = (binary_vecs & neuron).sum(dim=1)
     if neuron_count is None:
@@ -197,8 +187,12 @@ def search_all(
     else:
         device = torch.device("cpu")
     
-    activation_vectors = to_binary_tensor(activation_vectors, device)
-    feature_vectors = prepare_feature_vectors(feature_vectors, device)
+    activation_vectors = torch.as_tensor(activation_vectors,dtype=torch.bool,device=device)
+    feature_vectors = [
+        (formula, torch.as_tensor(binary_vector,dtype=torch.bool,device=device))
+        for formula, binary_vector in feature_vectors
+    ]
+
     pairs = LevelSearch(activation_vectors, feature_vectors, config)
     return [
         SearchResult(activation_index, formula, score)
