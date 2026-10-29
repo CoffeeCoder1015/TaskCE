@@ -6,6 +6,8 @@ import numpy as np
 import sympy
 import torch
 from .formula import logic_str
+from .kernels import batched_iou
+from .packing import pack_vectors
 from sympy.logic import And, Or, Not
 
 @dataclass(frozen=True)
@@ -15,22 +17,11 @@ class SearchResult:
     best_score: float
 
 
-# Match eager division rounding so compilation preserves IoU scores.
-@torch.compile(fullgraph=True, options={"emulate_divison_rounding": True})
-def batched_iou(neuron,binary_vecs,neuron_count=None):
-    intersections = (binary_vecs & neuron).sum(dim=1)
-    if neuron_count is None:
-        neuron_count = neuron.sum()
-    unions = binary_vecs.sum(dim=1) + neuron_count - intersections
-    raw_scores = intersections.float() / unions.clamp_min(1).float()
-    return torch.where(unions > 0, raw_scores, torch.zeros_like(raw_scores))
-
 def calculate_ious(neuron, vectors, batch_size):
     output = []
-    neuron_count = neuron.sum()
     for i in range(0, len(vectors), batch_size):
         batch = vectors[i:i+batch_size]
-        iou = batched_iou(neuron, batch, neuron_count)
+        iou = batched_iou(neuron, batch)
         output.append(iou)
     return torch.cat(output).detach()
 
@@ -44,7 +35,7 @@ class SearchConfig:
     iou_calculation_batch_size: int = 16384
 
 def LevelSearch(neurons: torch.Tensor,concept_atoms: list[sympy.Expr], concept_vectors: torch.Tensor, config=SearchConfig()):
-    """Serial mock: [examples, neurons] and shared [examples] concepts yield per-column pairs."""
+    """Search packed [word, neuron] activations using [concept, word] masks."""
     results = []
     for activation_index in range(neurons.shape[1]):
         neuron = neurons[:, activation_index].contiguous()
@@ -91,7 +82,7 @@ def LevelSearch(neurons: torch.Tensor,concept_atoms: list[sympy.Expr], concept_v
             if parent_indices:
                 parent_vectors = beam_vectors[parent_indices].unsqueeze(1)
                 expansion_concepts = nonzero_vectors.unsqueeze(0)
-                # [parent, concept, operation, sample]; operations are AND, OR, AND NOT.
+                # [parent, concept, operation, word]; operations are AND, OR, AND NOT.
                 compositions = torch.stack(
                     (
                         parent_vectors & expansion_concepts,
@@ -189,8 +180,8 @@ def search_all(
     else:
         device = torch.device("cpu")
     
-    # move onto accelerator
-    activation_vectors = torch.as_tensor(activation_vectors,dtype=torch.bool,device=device)
+    # Pack on the CPU, then keep one contiguous word vector per neuron column.
+    activation_vectors = pack_vectors(np.asarray(activation_vectors).T, device).T
     
     atoms = []
     binary_vectors = []
@@ -199,10 +190,8 @@ def search_all(
         atoms.append(formula)
         binary_vectors.append(binary_vector)
 
-    # Stack on the CPU so the concepts reach the GPU in one transfer.
-    concept_vectors = torch.as_tensor(
-        np.stack(binary_vectors), dtype=torch.bool, device=device
-    )
+    # Stack and pack on the CPU so concepts reach the GPU in one transfer.
+    concept_vectors = pack_vectors(np.stack(binary_vectors), device)
 
     pairs = LevelSearch(activation_vectors,atoms,concept_vectors , config)
     return [
