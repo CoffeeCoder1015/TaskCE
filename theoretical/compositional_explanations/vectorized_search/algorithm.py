@@ -14,15 +14,6 @@ class SearchResult:
     best_score: float
 
 
-# Helper functions for compute
-def resolve_device(device=None):
-    if device is not None:
-        return torch.device(device)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    return torch.device("cpu")
-
-
 def to_binary_tensor(value, device):
     return torch.as_tensor(value, dtype=torch.bool, device=device)
 
@@ -198,7 +189,14 @@ def search_all(
     config=None,
 ):
     config = config or SearchConfig()
-    device = resolve_device(device)
+
+    if device is not None:
+        device =  torch.device(device)
+    elif torch.cuda.is_available():
+        device = torch.device("cuda")
+    else:
+        device = torch.device("cpu")
+    
     activation_vectors = to_binary_tensor(activation_vectors, device)
     feature_vectors = prepare_feature_vectors(feature_vectors, device)
     pairs = LevelSearch(activation_vectors, feature_vectors, config)
