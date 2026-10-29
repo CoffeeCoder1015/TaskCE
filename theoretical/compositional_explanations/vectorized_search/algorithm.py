@@ -14,6 +14,8 @@ class SearchResult:
     best_score: float
 
 
+# Match eager division rounding so compilation preserves IoU scores.
+@torch.compile(fullgraph=True, options={"emulate_divison_rounding": True})
 def batched_iou(neuron,binary_vecs,neuron_count=None):
     intersections = (binary_vecs & neuron).sum(dim=1)
     if neuron_count is None:
