@@ -5,9 +5,10 @@ from sympy import Symbol
 import numpy as np
 import sympy
 import torch
+import triton
+import triton.language as tl
+from triton.language.extra.cuda import libdevice
 from .formula import logic_str
-from .kernels import batched_iou
-from .packing import pack_vectors
 from sympy.logic import And, Or, Not
 
 @dataclass(frozen=True)
@@ -15,6 +16,22 @@ class SearchResult:
     activation_index: int
     best_formula: str
     best_score: float
+
+
+def batched_iou(neuron: torch.Tensor, vectors: torch.Tensor) -> torch.Tensor:
+    """Score contiguous int32 [word] against [row, word]; return float32 [row]."""
+    row_count, word_count = vectors.shape
+    scores = torch.empty(row_count, dtype=torch.float32, device=vectors.device)
+    _batched_iou_kernel[(row_count,)](
+        neuron,
+        vectors,
+        scores,
+        word_count,
+        BLOCK_WIDTH=triton.next_power_of_2(word_count),
+        num_warps=4,
+    )
+    return scores
+
 
 
 def calculate_ious(neuron, vectors, batch_size):
@@ -25,6 +42,39 @@ def calculate_ious(neuron, vectors, batch_size):
         output.append(iou)
     return torch.cat(output).detach()
 
+
+
+def pack_vectors(vectors: np.ndarray, device: torch.device) -> torch.Tensor:
+    """Pack [vector, sample] into int32 [vector, word], with zero tail padding."""
+    packed_bytes = np.packbits(vectors, axis=1, bitorder="little")
+    padding_bytes = -packed_bytes.shape[1] % 4
+    if padding_bytes:
+        packed_bytes = np.pad(packed_bytes, ((0, 0), (0, padding_bytes)))
+    packed_words = np.ascontiguousarray(packed_bytes).view(np.int32)
+    return torch.from_numpy(packed_words).to(device=device)
+
+
+
+@triton.jit
+def _batched_iou_kernel(
+    neuron,
+    vectors,
+    scores,
+    word_count,
+    BLOCK_WIDTH: tl.constexpr,
+):
+    row = tl.program_id(0)
+    words = tl.arange(0, BLOCK_WIDTH)
+    valid_words = words < word_count
+    neuron_words = tl.load(neuron + words, mask=valid_words, other=0)
+    candidate_words = tl.load(
+        vectors + row * word_count + words, mask=valid_words, other=0
+    )
+    intersection = tl.sum(libdevice.popc(neuron_words & candidate_words), axis=0)
+    union = tl.sum(libdevice.popc(neuron_words | candidate_words), axis=0)
+    # Round division like eager float32 IoU to preserve score ties.
+    score = tl.div_rn(intersection.to(tl.float32), tl.maximum(union, 1).to(tl.float32))
+    tl.store(scores + row, score)
 
 
 @dataclass
