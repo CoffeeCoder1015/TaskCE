@@ -1,7 +1,7 @@
 """Run the SNLI compositional analysis for every captured layer."""
 
 from analysis import DATA_DIRECTORY, activation_path, run
-from vectorized_search.algorithm import search_all
+from new_search.algorithm import search_all
 
 
 # Configuration
