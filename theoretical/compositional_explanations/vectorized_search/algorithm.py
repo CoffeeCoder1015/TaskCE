@@ -22,6 +22,8 @@ def batched_iou(neuron: torch.Tensor, vectors: torch.Tensor) -> torch.Tensor:
     """Score contiguous int32 [word] against [row, word]; return float32 [row]."""
     row_count, word_count = vectors.shape
     scores = torch.empty(row_count, dtype=torch.float32, device=vectors.device)
+    # tl.arange requires a power-of-two logical width covering the row.
+    # Extra positions load zero through valid_words; no stored words are appended.
     _batched_iou_kernel[(row_count,)](
         neuron,
         vectors,
@@ -47,6 +49,8 @@ def calculate_ious(neuron, vectors, batch_size):
 def pack_vectors(vectors: np.ndarray, device: torch.device) -> torch.Tensor:
     """Pack [vector, sample] into int32 [vector, word], with zero tail padding."""
     packed_bytes = np.packbits(vectors, axis=1, bitorder="little")
+    # packbits produces whole bytes; the int32 view needs groups of four bytes.
+    # (-byte_count) % 4 adds 0..3 zero bytes to complete the final word.
     padding_bytes = -packed_bytes.shape[1] % 4
     if padding_bytes:
         packed_bytes = np.pad(packed_bytes, ((0, 0), (0, padding_bytes)))
