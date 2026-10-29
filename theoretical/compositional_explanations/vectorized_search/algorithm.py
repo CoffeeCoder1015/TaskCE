@@ -40,23 +40,22 @@ class SearchConfig:
     max_iterations: int = 10
     iou_calculation_batch_size: int = 16384
 
-def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Tensor]], config=SearchConfig()):
+def LevelSearch(neurons: torch.Tensor,concept_atoms: list[sympy.Expr], concept_vectors: torch.Tensor, config=SearchConfig()):
     """Serial mock: [examples, neurons] and shared [examples] concepts yield per-column pairs."""
     results = []
     for activation_index in range(neurons.shape[1]):
         neuron = neurons[:, activation_index].contiguous()
         print("Neuron shape:",neuron.shape)
-        print("Feature shape:",concepts[0][1].shape)
+        print("Feature shape:",concept_vectors[0].shape)
 
-        vectors = torch.stack([vector for _, vector in concepts])
-        ious = calculate_ious(neuron, vectors, config.iou_calculation_batch_size)
+        ious = calculate_ious(neuron, concept_vectors, config.iou_calculation_batch_size)
 
         nonzero_indices = torch.argsort(ious, descending=True, stable=True)
         nonzero_indices = nonzero_indices[ious[nonzero_indices] > 0]
-        nonzero_vectors = vectors[nonzero_indices]
+        nonzero_vectors = concept_vectors[nonzero_indices]
         # Each CPU formula corresponds to the same row in the GPU tensor.
-        nonzero_formulas = [concepts[index][0] for index in nonzero_indices.cpu().tolist()]
-        print("Pre/Post zero filtering:", len(concepts), len(nonzero_formulas))
+        nonzero_formulas = [concept_atoms[index] for index in nonzero_indices.cpu().tolist()]
+        print("Pre/Post zero filtering:", len(concept_atoms), len(nonzero_formulas))
 
         beam_size = config.beam_size
         beam_vectors = nonzero_vectors[:beam_size].clone()
@@ -88,13 +87,13 @@ def LevelSearch(neurons: torch.Tensor, concepts: list[tuple[sympy.Expr, torch.Te
             generated_count = 0
             if parent_indices:
                 parent_vectors = beam_vectors[parent_indices].unsqueeze(1)
-                concept_vectors = nonzero_vectors.unsqueeze(0)
+                expansion_concepts = nonzero_vectors.unsqueeze(0)
                 # [parent, concept, operation, sample]; operations are AND, OR, AND NOT.
                 compositions = torch.stack(
                     (
-                        parent_vectors & concept_vectors,
-                        parent_vectors | concept_vectors,
-                        parent_vectors & ~concept_vectors,
+                        parent_vectors & expansion_concepts,
+                        parent_vectors | expansion_concepts,
+                        parent_vectors & ~expansion_concepts,
                     ),
                     dim=2,
                 )
@@ -187,13 +186,21 @@ def search_all(
     else:
         device = torch.device("cpu")
     
+    # move onto accelerator
     activation_vectors = torch.as_tensor(activation_vectors,dtype=torch.bool,device=device)
-    feature_vectors = [
-        (formula, torch.as_tensor(binary_vector,dtype=torch.bool,device=device))
-        for formula, binary_vector in feature_vectors
-    ]
+    
+    atoms = []
+    binary_vectors = []
+    # decouple
+    for formula, binary_vector in feature_vectors:
+        atoms.append(formula)
+        # move onto accelerator
+        binary_vectors.append(torch.as_tensor(binary_vector,dtype=torch.bool,device=device))
 
-    pairs = LevelSearch(activation_vectors, feature_vectors, config)
+    # stack them
+    concept_vectors = torch.stack(binary_vectors)
+
+    pairs = LevelSearch(activation_vectors,atoms,concept_vectors , config)
     return [
         SearchResult(activation_index, formula, score)
         for activation_index, (formula, score) in enumerate(pairs)
