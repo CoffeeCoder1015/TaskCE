@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from sympy import Symbol
 
+import numpy as np
 import sympy
 import torch
 from .formula import logic_str
@@ -196,11 +197,12 @@ def search_all(
     # decouple
     for formula, binary_vector in feature_vectors:
         atoms.append(formula)
-        # move onto accelerator
-        binary_vectors.append(torch.as_tensor(binary_vector,dtype=torch.bool,device=device))
+        binary_vectors.append(binary_vector)
 
-    # stack them
-    concept_vectors = torch.stack(binary_vectors)
+    # Stack on the CPU so the concepts reach the GPU in one transfer.
+    concept_vectors = torch.as_tensor(
+        np.stack(binary_vectors), dtype=torch.bool, device=device
+    )
 
     pairs = LevelSearch(activation_vectors,atoms,concept_vectors , config)
     return [
